@@ -1,5 +1,5 @@
 #!/bin/sh
-'''exec' "/Users/paulruedi/Desktop/web calcs/annual_need/annual/bin/python3.11" "$0" "$@"
+'''exec' "/Users/paulruedi/Desktop/Updated Web Calcs/annual_need/annual/bin/python3.13" "$0" "$@"
 ' '''
 import sys
 from charset_normalizer.cli import cli_detect

@@ -11,6 +11,8 @@ from textwrap import dedent
 #       with a chosen confidence over N years, using historical factors.
 ##############################
 
+##
+
 st.set_page_config(layout="wide")
 st.title("Required Annual Investment by Allocation (Worksheet-Driven)")
 st.caption("Computes the annual contribution required to reach BOTH an Ideal Goal (at its confidence) AND an Acceptable Goal (at 100%), using historical factor windows.")
