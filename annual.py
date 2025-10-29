@@ -20,8 +20,8 @@ st.caption("Computes the annual contribution required to reach BOTH an Ideal Goa
 # ------------------------------
 # Inputs (you can change defaults)
 # ------------------------------
-file_path = "all_portfolio_annual_factors.xlsx"
-sheet_name = "allocation_factors"
+file_path = "global_factors.xlsx"
+sheet_name = "global_factors"
 
 col1, col2, col3 = st.columns(3)
 with col1:
