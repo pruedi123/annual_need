@@ -22,6 +22,8 @@ st.caption("Computes the annual contribution required to reach BOTH an Ideal Goa
 # ------------------------------
 file_path = "global_factors.xlsx"
 sheet_name = "global_factors"
+spx_file_path = "spx_factors.xlsx"
+spx_sheet_name = "spx_factors"
 
 col1, col2, col3 = st.columns(3)
 with col1:
@@ -29,7 +31,7 @@ with col1:
         "Data source",
         ["Global Equity", "S&P 500", "Both Global & SP500"],
         index=0,
-        help="Choose the factor set: LBM workbook (Excel) or S&P 500 CSV (spx_factors.csv).",
+        help="Choose the factor set: LBM workbook (Excel) or S&P 500 workbook (spx_factors.xlsx).",
     )
     ideal_goal = st.number_input("Ideal Goal ($)", min_value=1, step=50000, value=1_000_000,
                                  help="Today’s dollars: same buying power as money today.",
@@ -50,7 +52,7 @@ with col3:
 row_increment = 12  # Data is monthly, so step 12 rows per year
 
 st.divider()
-# Load factors (LBM Excel or SPX CSV)
+# Load factors (LBM Excel or SPX Excel)
 if data_choice.startswith("Both"):
     src_kind = "BOTH"
 elif data_choice.startswith("Global"):
@@ -65,7 +67,7 @@ except Exception as e:
     st.error(f"Error loading LBM factors: {e}")
 try:
     if src_kind in ("SPX", "BOTH"):
-        df_spx = pd.read_csv("spx_factors.csv", sep=None, engine="python")
+        df_spx = pd.read_excel(spx_file_path, sheet_name=spx_sheet_name)
 except Exception as e:
     st.error(f"Error loading SPX factors: {e}")
 
@@ -465,4 +467,3 @@ for label, pdf_file in pdf_candidates:
         st.info(f"Add `{pdf_file}` to the app folder to enable {label} disclosures.")
 
 st.markdown('[Click here to go to Main Site](https://www.paulruedi.com)')
-
