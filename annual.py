@@ -4,6 +4,7 @@ import streamlit as st
 from streamlit.runtime.scriptrunner import RerunException, RerunData
 import plotly.graph_objects as go
 from textwrap import dedent
+import inspect
 
 PRETTY_LBM = {'LBM 100E':'100% Equity','LBM 90E':'90% Equity','LBM 80E':'80% Equity','LBM 70E':'70% Equity',
               'LBM 60E':'60% Equity','LBM 50E':'50% Equity','LBM 40E':'40% Equity','LBM 30E':'30% Equity',
@@ -146,6 +147,26 @@ if options_ann_spx:
 
 def _rerun():
     raise RerunException(RerunData(None))
+
+_PLOTLY_SUPPORTS_WIDTH = "width" in inspect.signature(st.plotly_chart).parameters
+
+def _render_plotly(fig):
+    kwargs = {}
+    if _PLOTLY_SUPPORTS_WIDTH:
+        kwargs["width"] = "stretch"
+    else:
+        kwargs["use_container_width"] = True
+    st.plotly_chart(fig, **kwargs)
+
+def _fmt_currency(val):
+    if val is None:
+        return "N/A"
+    try:
+        if not np.isfinite(val):
+            return "N/A"
+    except TypeError:
+        return "N/A"
+    return f"${val:,.0f}"
 
 if ((src_kind in ("LBM","BOTH") and allocation_meta_lbm) or
     (src_kind in ("SPX","BOTH") and allocation_meta_spx)):
@@ -530,24 +551,44 @@ if have_any:
             st.table(pd.DataFrame(floor_rows))
 
     summary_rows = []
+    summary_details = []
     for source in ["Global","SP500"]:
         sel = selected_rows.get(source)
         if not sel:
             continue
         req = sel.get("Required Annual")
         end_val = sel.get("Ending Value")
+        floor_val = lump_floor.get(source, 0.0)
+        current_label = lump_label.get(source) or "—"
+        annual_label = selected_labels.get(source) or (sel.get("Allocation") if sel else "—")
         summary_rows.append({
             "Source": source,
-            "Annual Allocation": selected_labels.get(source) or sel.get("Allocation"),
+            "Annual Allocation": annual_label,
             "Required Annual": "" if req is None or not np.isfinite(req) else f"${req:,.0f}",
-            "Current Allocation": lump_label.get(source) or "—",
-            f"Current Floor ({current_conf_pct:.0f}%)": f"${lump_floor.get(source, 0.0):,.0f}",
+            "Current Allocation": current_label,
+            f"Current Floor ({current_conf_pct:.0f}%)": f"${floor_val:,.0f}",
             f"Ending Value @ {conf_pct_ideal:.0f}%": "" if end_val is None or not np.isfinite(end_val) else f"${end_val:,.0f}",
+        })
+        summary_details.append({
+            "source": source,
+            "current_label": current_label,
+            "annual_label": annual_label,
+            "floor": floor_val,
+            "required": req if req is not None and np.isfinite(req) else None,
+            "ending": end_val if end_val is not None and np.isfinite(end_val) else None,
         })
     if summary_rows:
         st.subheader("Selected Allocation Results")
         st.caption("Compares the chosen annual contribution allocation with the current-portfolio floor.")
         st.table(pd.DataFrame(summary_rows))
+        expl_lines = ["**Explanation**"]
+        for det in summary_details:
+            expl_lines.append(
+                f"- **{det['source']}**: current portfolio in {det['current_label']} provides a {current_conf_pct:.0f}% floor of {_fmt_currency(det['floor'])}. "
+                f"Investing {_fmt_currency(det['required'])} per year into {det['annual_label']} targets the ${ideal_goal:,.0f} goal at {conf_pct_ideal:.0f}% confidence "
+                f"(projected ending value {_fmt_currency(det['ending'])})."
+            )
+        st.markdown("\n".join(expl_lines))
     else:
         st.info("Select at least one annual contribution allocation above to view results.")
 
@@ -812,7 +853,7 @@ if have_any:
             fig_g.add_bar(name="Global", x=chart_df["Allocation"], y=g_vals, marker_color=g_colors)
             fig_g.update_layout(title="Required Annual — Global", xaxis_title="Allocation", yaxis_title="Required Annual ($)",
                                 yaxis=dict(tickformat=",.0f", tickprefix="$"), showlegend=False)
-            st.plotly_chart(fig_g, width="stretch")
+            _render_plotly(fig_g)
         # SP500 chart
         if "SP500" in chart_df.columns and chart_df["SP500"].notna().any():
             s_vals = chart_df["SP500"]
@@ -830,7 +871,7 @@ if have_any:
             fig_s.add_bar(name="SP500", x=chart_df["Allocation"], y=s_vals, marker_color=s_colors)
             fig_s.update_layout(title="Required Annual — SP500", xaxis_title="Allocation", yaxis_title="Required Annual ($)",
                                 yaxis=dict(tickformat=",.0f", tickprefix="$"), showlegend=False)
-            st.plotly_chart(fig_s, width="stretch")
+            _render_plotly(fig_s)
 
     # Download (CSV)
     csv = wide_req.to_csv(index=False)
