@@ -581,14 +581,6 @@ if have_any:
         st.subheader("Selected Allocation Results")
         st.caption("Compares the chosen annual contribution allocation with the current-portfolio floor.")
         st.table(pd.DataFrame(summary_rows))
-        expl_lines = ["**Explanation**"]
-        for det in summary_details:
-            expl_lines.append(
-                f"- **{det['source']}**: current portfolio in {det['current_label']} provides a {current_conf_pct:.0f}% floor of {_fmt_currency(det['floor'])}. "
-                f"Investing {_fmt_currency(det['required'])} per year into {det['annual_label']} targets the ${ideal_goal:,.0f} goal at {conf_pct_ideal:.0f}% confidence "
-                f"(projected ending value {_fmt_currency(det['ending'])})."
-            )
-        st.markdown("\n".join(expl_lines))
     else:
         st.info("Select at least one annual contribution allocation above to view results.")
 
@@ -689,6 +681,10 @@ if have_any:
             "P25": f"${p25:,.0f}",
             "Median": f"${p50:,.0f}",
             "P75": f"${p75:,.0f}",
+            "Failure Rate Raw": num_fail / total,
+            "Failures Raw": num_fail,
+            "Worst Raw": worst,
+            "Median Raw": p50,
         })
 
     # Analyze selected annual allocations
@@ -785,6 +781,8 @@ if have_any:
             "Median": f"${p50:,.0f}",
             "P75": f"${p75:,.0f}",
             "Best": f"${best:,.0f}",
+            "Success Rate Raw": num_succ / total,
+            "P25 Raw": p25,
         })
 
     def _run_success_for_source(source: str, choice_meta):
@@ -831,6 +829,29 @@ if have_any:
         )
     else:
         st.info("No successes found at the selected settings for the chosen allocation(s).")
+
+    if summary_details:
+        fail_lookup = {r["Source"]: r for r in failure_rows}
+        succ_lookup = {r["Source"]: r for r in success_rows}
+        st.subheader("Result Explanation (plain text)")
+        for det in summary_details:
+            src = det["source"]
+            req_text = _fmt_currency(det["required"])
+            succ = succ_lookup.get(src, {})
+            fail = fail_lookup.get(src, {})
+            success_rate = succ.get("Success Rate", f"{conf_pct_ideal:.0f}% target")
+            p25_text = succ.get("P25", "N/A")
+            failure_rate = fail.get("Failure Rate", "0.0%")
+            num_fail = fail.get("Failures Raw", 0)
+            worst_txt = fail.get("Worst", "N/A")
+            median_txt = fail.get("Median", "N/A")
+            explanation = (
+                f"{src}: To achieve your goal under current terms, you will need to invest {req_text} each year for {int(num_years)} years. "
+                f"The current allocation would be {det['current_label']} and the required annual contributions stay in {det['annual_label']}. "
+                f"Historically, that mix met the Ideal goal of ${ideal_goal:,.0f} with a success rate of {success_rate}; the median outcome was {p25_text}. "
+                f"About {failure_rate} of windows (roughly {num_fail} simulations) fell short—the worst ending value was {worst_txt} and the typical shortfall (median failure) was {median_txt}."
+            )
+            st.text(explanation)
 
     # Charts (separate), highlight selected allocation (fallback to minimum if none)
     chart_df = wide_req.copy()
