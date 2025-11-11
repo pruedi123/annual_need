@@ -364,11 +364,11 @@ if "solver_rows_display" not in st.session_state:
 
 solver_cols = st.columns([2, 2, 3])
 with solver_cols[0]:
-    if st.button("Apply Manual Selection", use_container_width=True):
+    if st.button("Apply Manual Selection", width="stretch"):
         st.session_state["solver_rows_display"] = None
         _rerun()
 with solver_cols[1]:
-    run_solver = st.button("Run Solver (Min Required Annual)", use_container_width=True)
+    run_solver = st.button("Run Solver (Min Required Annual)", width="stretch")
 
 if run_solver:
     solver_rows = []
@@ -680,7 +680,7 @@ if have_any:
             fail_df,
             hide_index=True,
             disabled=True,
-            use_container_width=True,
+            width="stretch",
             column_config={
                 "Source": st.column_config.TextColumn("Source", help="Data source used."),
                 "Allocation": st.column_config.TextColumn("Allocation", help="Selected annual allocation at current settings."),
@@ -774,7 +774,7 @@ if have_any:
             succ_df,
             hide_index=True,
             disabled=True,
-            use_container_width=True,
+            width="stretch",
             column_config={
                 "Source": st.column_config.TextColumn("Source", help="Data source used."),
                 "Allocation": st.column_config.TextColumn("Allocation", help="Selected annual allocation at current settings."),
@@ -812,7 +812,7 @@ if have_any:
             fig_g.add_bar(name="Global", x=chart_df["Allocation"], y=g_vals, marker_color=g_colors)
             fig_g.update_layout(title="Required Annual — Global", xaxis_title="Allocation", yaxis_title="Required Annual ($)",
                                 yaxis=dict(tickformat=",.0f", tickprefix="$"), showlegend=False)
-            st.plotly_chart(fig_g, use_container_width=True)
+            st.plotly_chart(fig_g, width="stretch")
         # SP500 chart
         if "SP500" in chart_df.columns and chart_df["SP500"].notna().any():
             s_vals = chart_df["SP500"]
@@ -830,7 +830,7 @@ if have_any:
             fig_s.add_bar(name="SP500", x=chart_df["Allocation"], y=s_vals, marker_color=s_colors)
             fig_s.update_layout(title="Required Annual — SP500", xaxis_title="Allocation", yaxis_title="Required Annual ($)",
                                 yaxis=dict(tickformat=",.0f", tickprefix="$"), showlegend=False)
-            st.plotly_chart(fig_s, use_container_width=True)
+            st.plotly_chart(fig_s, width="stretch")
 
     # Download (CSV)
     csv = wide_req.to_csv(index=False)
