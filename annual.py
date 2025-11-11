@@ -1,8 +1,16 @@
 import numpy as np
 import pandas as pd
 import streamlit as st
+from streamlit.runtime.scriptrunner import RerunException, RerunData
 import plotly.graph_objects as go
 from textwrap import dedent
+
+PRETTY_LBM = {'LBM 100E':'100% Equity','LBM 90E':'90% Equity','LBM 80E':'80% Equity','LBM 70E':'70% Equity',
+              'LBM 60E':'60% Equity','LBM 50E':'50% Equity','LBM 40E':'40% Equity','LBM 30E':'30% Equity',
+              'LBM 20E':'20% Equity','LBM 10E':'10% Equity','LBM 100F':'100% Fixed'}
+PRETTY_SPX = {f"spx{p}e": f"{p}% Equity" for p in [100,90,80,70,60,50,40,30,20,10,0]}
+GENERIC_ORDER = ["100% Equity","90% Equity","80% Equity","70% Equity","60% Equity","50% Equity",
+                 "40% Equity","30% Equity","20% Equity","10% Equity","100% Fixed"]
 
 ##############################
 # App: Required Annual Invest
@@ -26,6 +34,10 @@ spx_file_path = "spx_factors.xlsx"
 spx_sheet_name = "spx_factors"
 
 col1, col2, col3 = st.columns(3)
+current_alloc_choice_global = None
+current_alloc_choice_spx = None
+annual_alloc_choice_global = None
+annual_alloc_choice_spx = None
 with col1:
     data_choice = st.selectbox(
         "Data source",
@@ -33,7 +45,7 @@ with col1:
         index=0,
         help="Choose the factor set: LBM workbook (Excel) or S&P 500 workbook (spx_factors.xlsx).",
     )
-    ideal_goal = st.number_input("Ideal Goal ($)", min_value=1, step=50000, value=1_000_000,
+    ideal_goal = st.number_input("Ideal Goal ($)", min_value=1, step=50000, value=3_000_000,
                                  help="Today’s dollars: same buying power as money today.",
                                  format="%i")
     conf_pct_ideal = st.slider("Ideal Confidence (%)", min_value=50, step= 10, max_value=100, value=100,
@@ -41,13 +53,18 @@ with col1:
     ideal_conf_level = conf_pct_ideal / 100.0
 with col2:
     num_years = st.number_input("Years", min_value=1, max_value=60, value=30)
-    acceptable_goal = st.number_input("Essential Goal ($)", min_value=1, step=50000, value=800_000,
+    acceptable_goal = st.number_input("Essential Goal ($)", min_value=1, step=50000, value=2_500_000,
                                       help="A minimum acceptable outcome (floor) sized at 100% confidence.",
                                       format="%i")
     current_portfolio_value = st.number_input(
         "Current Portfolio Value ($)", min_value=0, step=50_000, value=0,
         help="How much is already invested today. It compounds through the historical windows alongside new contributions.",
         format="%i"
+    )
+    current_conf_pct = st.slider(
+        "Current Portfolio Confidence (%)",
+        min_value=50, max_value=100, value=100, step=5,
+        help="Use less than 100% to size the already-invested portfolio at, say, the 90% (10th percentile) outcome.",
     )
     acceptable_conf_level = 1.0  # fixed 100%
 with col3:
@@ -77,21 +94,113 @@ except Exception as e:
     st.error(f"Error loading SPX factors: {e}")
 
 allocation_cols_lbm, allocation_cols_spx = [], []
+allocation_meta_lbm, allocation_meta_spx = [], []
 if df_lbm is not None:
     df_lbm.columns = df_lbm.columns.astype(str).str.strip().str.replace("  ", " ")
     allocation_cols_lbm = [c for c in df_lbm.columns if c.upper().startswith("LBM ")]
-    for c in allocation_cols_lbm: df_lbm[c] = pd.to_numeric(df_lbm[c], errors='coerce')
+    for c in allocation_cols_lbm:
+        df_lbm[c] = pd.to_numeric(df_lbm[c], errors='coerce')
+        allocation_meta_lbm.append({"raw": c, "clean": c.strip()})
 if df_spx is not None:
     df_spx.columns = df_spx.columns.astype(str).str.strip().str.replace("  ", " ")
     allocation_cols_spx = [c for c in df_spx.columns if c.upper().startswith("SPX")]
-    for c in allocation_cols_spx: df_spx[c] = pd.to_numeric(df_spx[c], errors='coerce')
+    for c in allocation_cols_spx:
+        df_spx[c] = pd.to_numeric(df_spx[c], errors='coerce')
+        allocation_meta_spx.append({"raw": c, "clean": c.strip()})
 if src_kind in ("LBM","BOTH") and not allocation_cols_lbm:
     st.warning("No allocation columns found in LBM (expected headers starting with 'LBM ').")
 if src_kind in ("SPX","BOTH") and not allocation_cols_spx:
     st.warning("No allocation columns found in SPX (expected headers like 'spx60e', 'spx40e', etc.).")
 
+def _meta_by_clean(metas, clean):
+    if not metas or clean is None:
+        return None
+    for meta in metas:
+        if meta["clean"] == clean:
+            return meta
+    return None
+
+def _clean_list(metas):
+    return [m["clean"] for m in metas] if metas else []
+
+def _sync_state(key, options):
+    pending_key = f"pending_{key}"
+    if pending_key in st.session_state:
+        st.session_state[key] = st.session_state.pop(pending_key)
+    if key not in st.session_state or st.session_state[key] not in options:
+        st.session_state[key] = options[0] if options else None
+
+options_curr_global = _clean_list(allocation_meta_lbm)
+options_curr_spx = _clean_list(allocation_meta_spx)
+options_ann_global = _clean_list(allocation_meta_lbm)
+options_ann_spx = _clean_list(allocation_meta_spx)
+
+if options_curr_global:
+    _sync_state("current_alloc_global", options_curr_global)
+if options_curr_spx:
+    _sync_state("current_alloc_spx", options_curr_spx)
+if options_ann_global:
+    _sync_state("annual_alloc_global", options_ann_global)
+if options_ann_spx:
+    _sync_state("annual_alloc_spx", options_ann_spx)
+
+def _rerun():
+    raise RerunException(RerunData(None))
+
+if ((src_kind in ("LBM","BOTH") and allocation_meta_lbm) or
+    (src_kind in ("SPX","BOTH") and allocation_meta_spx)):
+    st.markdown("#### Current Portfolio Allocation")
+    help_text = "Select which allocation the existing portfolio follows. It stays constant over the full horizon."
+    st.caption(help_text)
+    cols_alloc = st.columns(2)
+    if src_kind in ("LBM","BOTH") and allocation_meta_lbm:
+        with cols_alloc[0]:
+            current_alloc_choice_global_clean = st.selectbox(
+                "Global data",
+                options=options_curr_global,
+                format_func=lambda clean: PRETTY_LBM.get(clean, clean),
+                key="current_alloc_global"
+            )
+            current_alloc_choice_global = _meta_by_clean(allocation_meta_lbm, current_alloc_choice_global_clean)
+    if src_kind in ("SPX","BOTH") and allocation_meta_spx:
+        target_col = cols_alloc[0] if src_kind == "SPX" else cols_alloc[1]
+        with target_col:
+            current_alloc_choice_spx_clean = st.selectbox(
+                "S&P 500 data",
+                options=options_curr_spx,
+                format_func=lambda clean: PRETTY_SPX.get(clean, clean),
+                key="current_alloc_spx"
+            )
+            current_alloc_choice_spx = _meta_by_clean(allocation_meta_spx, current_alloc_choice_spx_clean)
+
+if ((src_kind in ("LBM","BOTH") and allocation_meta_lbm) or
+    (src_kind in ("SPX","BOTH") and allocation_meta_spx)):
+    st.markdown("#### Annual Contribution Allocation")
+    st.caption("Choose the allocation applied to ongoing annual contributions for each data source.")
+    cols_alloc_ann = st.columns(2)
+    if src_kind in ("LBM","BOTH") and allocation_meta_lbm:
+        with cols_alloc_ann[0]:
+            annual_alloc_choice_global_clean = st.selectbox(
+                "Global data (annual)",
+                options=options_ann_global,
+                format_func=lambda clean: PRETTY_LBM.get(clean, clean),
+                key="annual_alloc_global"
+            )
+            annual_alloc_choice_global = _meta_by_clean(allocation_meta_lbm, annual_alloc_choice_global_clean)
+    if src_kind in ("SPX","BOTH") and allocation_meta_spx:
+        target_col = cols_alloc_ann[0] if src_kind == "SPX" else cols_alloc_ann[1]
+        with target_col:
+            annual_alloc_choice_spx_clean = st.selectbox(
+                "S&P 500 data (annual)",
+                options=options_ann_spx,
+                format_func=lambda clean: PRETTY_SPX.get(clean, clean),
+                key="annual_alloc_spx"
+            )
+            annual_alloc_choice_spx = _meta_by_clean(allocation_meta_spx, annual_alloc_choice_spx_clean)
+
 fee = float(fee_pct)/100.0
 current_portfolio_value = float(current_portfolio_value)
+current_conf_tail = max(0.0, min(1.0, 1.0 - float(current_conf_pct) / 100.0))
 ideal_tail = max(0.0, min(1.0, 1.0 - float(ideal_conf_level)))
 if fee > 0:
     if df_lbm is not None and allocation_cols_lbm:
@@ -169,6 +278,127 @@ def required_annual_for_goal(ending_values: list, goal_amount: float, conf: floa
     return float(goal_amount) / float(ev)
 
 # ------------------------------
+# Precompute annuity/lump caches
+# ------------------------------
+
+calc_cache = {"Global": {}, "SP500": {}}
+lump_cache = {"Global": {}, "SP500": {}}
+
+def _build_caches(df_src, metas, source_label):
+    if df_src is None or not metas:
+        return
+    for meta in metas:
+        col_raw = meta["raw"]
+        col_clean = meta["clean"]
+        evs, lumps = simulate_annuity_and_lumpsum(df_src[col_raw], int(num_years), int(row_increment))
+        calc_cache[source_label][col_clean] = {"evs": np.array(evs, dtype=float)}
+        lump_cache[source_label][col_clean] = np.array(lumps, dtype=float)
+
+_build_caches(df_lbm, allocation_meta_lbm, "Global")
+_build_caches(df_spx, allocation_meta_spx, "SP500")
+
+# ------------------------------
+# Current portfolio floor calc
+# ------------------------------
+
+lump_floor = {"Global": 0.0, "SP500": 0.0}
+lump_label = {"Global": None, "SP500": None}
+if current_alloc_choice_global:
+    lump_label["Global"] = PRETTY_LBM.get(current_alloc_choice_global["clean"], current_alloc_choice_global["clean"])
+if current_alloc_choice_spx:
+    lump_label["SP500"] = PRETTY_SPX.get(current_alloc_choice_spx["clean"], current_alloc_choice_spx["clean"])
+
+def _floor_for_choice(source_label, choice_meta):
+    if current_portfolio_value <= 0 or not choice_meta:
+        return 0.0
+    lumps_arr = lump_cache[source_label].get(choice_meta["clean"])
+    if lumps_arr is None or lumps_arr.size == 0:
+        return 0.0
+    floor_factor = _quantile_linear(lumps_arr, current_conf_tail)
+    return float(floor_factor * current_portfolio_value)
+
+if current_alloc_choice_global:
+    lump_floor["Global"] = _floor_for_choice("Global", current_alloc_choice_global)
+if current_alloc_choice_spx:
+    lump_floor["SP500"] = _floor_for_choice("SP500", current_alloc_choice_spx)
+
+def _solve_source(source_label, metas):
+    if not metas:
+        return None
+    best = None
+    for current_meta in metas:
+        floor_val = _floor_for_choice(source_label, current_meta)
+        shortfall_ideal = max(float(ideal_goal) - floor_val, 0.0)
+        shortfall_accept = max(float(acceptable_goal) - floor_val, 0.0)
+        for annual_meta in metas:
+            evs_arr = calc_cache[source_label].get(annual_meta["clean"], {}).get("evs")
+            if evs_arr is None or evs_arr.size == 0:
+                continue
+            req_i = required_annual_for_goal(evs_arr, shortfall_ideal, float(ideal_conf_level))
+            req_a = required_annual_for_goal(evs_arr, shortfall_accept, 1.0)
+            req = max(req_i, req_a)
+            if not np.isfinite(req):
+                continue
+            total_arr = evs_arr * float(req)
+            ending_val = float('nan')
+            if total_arr.size:
+                ending_val = _quantile_linear(np.array(total_arr, dtype=float), ideal_tail) + floor_val
+            display_current = PRETTY_LBM.get(current_meta["clean"], current_meta["clean"]) if source_label == "Global" else PRETTY_SPX.get(current_meta["clean"], current_meta["clean"])
+            display_annual = PRETTY_LBM.get(annual_meta["clean"], annual_meta["clean"]) if source_label == "Global" else PRETTY_SPX.get(annual_meta["clean"], annual_meta["clean"])
+            entry = {
+                "Source": source_label,
+                "Current Allocation": display_current,
+                "Annual Allocation": display_annual,
+                "Floor": floor_val,
+                "Required Annual": float(req),
+                "Ending Value": ending_val,
+                "current_clean": current_meta["clean"],
+                "annual_clean": annual_meta["clean"],
+            }
+            if best is None or entry["Required Annual"] < best["Required Annual"]:
+                best = entry
+    return best
+
+if "solver_rows_display" not in st.session_state:
+    st.session_state["solver_rows_display"] = None
+
+solver_cols = st.columns([2, 2, 3])
+with solver_cols[0]:
+    if st.button("Apply Manual Selection", use_container_width=True):
+        st.session_state["solver_rows_display"] = None
+        _rerun()
+with solver_cols[1]:
+    run_solver = st.button("Run Solver (Min Required Annual)", use_container_width=True)
+
+if run_solver:
+    solver_rows = []
+    updated = False
+    if src_kind in ("LBM","BOTH"):
+        best_global = _solve_source("Global", allocation_meta_lbm)
+        if best_global:
+            solver_rows.append(best_global)
+            if best_global.get("current_clean"):
+                st.session_state["pending_current_alloc_global"] = best_global["current_clean"]
+            if best_global.get("annual_clean"):
+                st.session_state["pending_annual_alloc_global"] = best_global["annual_clean"]
+            updated = True
+    if src_kind in ("SPX","BOTH"):
+        best_spx = _solve_source("SP500", allocation_meta_spx)
+        if best_spx:
+            solver_rows.append(best_spx)
+            if best_spx.get("current_clean"):
+                st.session_state["pending_current_alloc_spx"] = best_spx["current_clean"]
+            if best_spx.get("annual_clean"):
+                st.session_state["pending_annual_alloc_spx"] = best_spx["annual_clean"]
+            updated = True
+    if solver_rows:
+        st.session_state["solver_rows_display"] = solver_rows
+    if updated:
+        _rerun()
+    else:
+        st.warning("Solver could not identify a feasible allocation based on the current inputs.")
+
+# ------------------------------
 # Run (auto)
 # ------------------------------
 have_any = (
@@ -177,92 +407,79 @@ have_any = (
 )
 if have_any:
     rows = []
-    calc_cache = {"Global": {}, "SP500": {}}
+    selected_rows = {"Global": None, "SP500": None}
+    selected_labels = {"Global": None, "SP500": None}
     # LBM
-    if src_kind in ("LBM","BOTH") and df_lbm is not None:
-        for col in allocation_cols_lbm:
-            col_clean = col.strip()
-            evs, lumps = simulate_annuity_and_lumpsum(df_lbm[col], int(num_years), int(row_increment))
-            evs_arr = np.array(evs, dtype=float)
-            lumps_arr = np.array(lumps, dtype=float)
-            calc_cache["Global"][col_clean] = {"evs": evs_arr, "lumps": lumps_arr}
-            lumps_actual = (
-                np.array(lumps_arr, dtype=float) * float(current_portfolio_value)
-                if current_portfolio_value > 0 and lumps_arr.size
-                else np.zeros_like(lumps_arr, dtype=float)
-            )
-            lumps_conf_100 = float(lumps_actual.min()) if lumps_actual.size else 0.0
-            shortfall_ideal = max(float(ideal_goal) - lumps_conf_100, 0.0)
-            shortfall_accept = max(float(acceptable_goal) - lumps_conf_100, 0.0)
+    if src_kind in ("LBM","BOTH") and allocation_meta_lbm:
+        lump_floor_global = float(lump_floor.get("Global", 0.0))
+        shortfall_ideal_global = max(float(ideal_goal) - lump_floor_global, 0.0)
+        shortfall_accept_global = max(float(acceptable_goal) - lump_floor_global, 0.0)
+        for meta in allocation_meta_lbm:
+            col_clean = meta["clean"]
+            evs_arr = calc_cache["Global"].get(col_clean, {}).get("evs")
+            if evs_arr is None:
+                continue
+            calc_cache["Global"][col_clean] = {"evs": evs_arr}
             if evs_arr.size == 0:
                 req = np.nan
                 ending_val = np.nan
             else:
-                req_i = required_annual_for_goal(evs_arr, shortfall_ideal, float(ideal_conf_level))
-                req_a = required_annual_for_goal(evs_arr, shortfall_accept, float(1.0))
+                req_i = required_annual_for_goal(evs_arr, shortfall_ideal_global, float(ideal_conf_level))
+                req_a = required_annual_for_goal(evs_arr, shortfall_accept_global, float(1.0))
                 req = max(req_i, req_a)
                 ending_val = np.nan
                 if np.isfinite(req):
                     total_arr = evs_arr * float(req)
-                    if lumps_actual.size == total_arr.size:
-                        total_arr = total_arr + lumps_actual
                     if total_arr.size:
-                        ending_val = _quantile_linear(np.array(total_arr, dtype=float), ideal_tail)
+                        ending_val = _quantile_linear(np.array(total_arr, dtype=float), ideal_tail) + lump_floor_global
             rows.append({
                 "Allocation": col_clean,
                 "Required Annual": np.nan if pd.isna(req) else float(req),
                 "Ending Value": np.nan if pd.isna(ending_val) else float(ending_val),
-                "Current Portfolio 100%": float(lumps_conf_100),
+                "Current Portfolio Floor": lump_floor_global,
             })
+            if annual_alloc_choice_global and col_clean == annual_alloc_choice_global["clean"]:
+                selected_rows["Global"] = rows[-1].copy()
+                selected_labels["Global"] = PRETTY_LBM.get(col_clean, col_clean)
     # SPX
-    if src_kind in ("SPX","BOTH") and df_spx is not None:
-        for col in allocation_cols_spx:
-            col_clean = col.strip()
-            evs, lumps = simulate_annuity_and_lumpsum(df_spx[col], int(num_years), int(row_increment))
-            evs_arr = np.array(evs, dtype=float)
-            lumps_arr = np.array(lumps, dtype=float)
-            calc_cache["SP500"][col_clean] = {"evs": evs_arr, "lumps": lumps_arr}
-            lumps_actual = (
-                np.array(lumps_arr, dtype=float) * float(current_portfolio_value)
-                if current_portfolio_value > 0 and lumps_arr.size
-                else np.zeros_like(lumps_arr, dtype=float)
-            )
-            lumps_conf_100 = float(lumps_actual.min()) if lumps_actual.size else 0.0
-            shortfall_ideal = max(float(ideal_goal) - lumps_conf_100, 0.0)
-            shortfall_accept = max(float(acceptable_goal) - lumps_conf_100, 0.0)
+    if src_kind in ("SPX","BOTH") and allocation_meta_spx:
+        lump_floor_spx = float(lump_floor.get("SP500", 0.0))
+        shortfall_ideal_spx = max(float(ideal_goal) - lump_floor_spx, 0.0)
+        shortfall_accept_spx = max(float(acceptable_goal) - lump_floor_spx, 0.0)
+        for meta in allocation_meta_spx:
+            col_clean = meta["clean"]
+            evs_arr = calc_cache["SP500"].get(col_clean, {}).get("evs")
+            if evs_arr is None:
+                continue
+            calc_cache["SP500"][col_clean] = {"evs": evs_arr}
             if evs_arr.size == 0:
                 req = np.nan
                 ending_val = np.nan
             else:
-                req_i = required_annual_for_goal(evs_arr, shortfall_ideal, float(ideal_conf_level))
-                req_a = required_annual_for_goal(evs_arr, shortfall_accept, float(1.0))
+                req_i = required_annual_for_goal(evs_arr, shortfall_ideal_spx, float(ideal_conf_level))
+                req_a = required_annual_for_goal(evs_arr, shortfall_accept_spx, float(1.0))
                 req = max(req_i, req_a)
                 ending_val = np.nan
                 if np.isfinite(req):
                     total_arr = evs_arr * float(req)
-                    if lumps_actual.size == total_arr.size:
-                        total_arr = total_arr + lumps_actual
                     if total_arr.size:
-                        ending_val = _quantile_linear(np.array(total_arr, dtype=float), ideal_tail)
+                        ending_val = _quantile_linear(np.array(total_arr, dtype=float), ideal_tail) + lump_floor_spx
             rows.append({
                 "Allocation": col_clean,
                 "Required Annual": np.nan if pd.isna(req) else float(req),
                 "Ending Value": np.nan if pd.isna(ending_val) else float(ending_val),
-                "Current Portfolio 100%": float(lumps_conf_100),
+                "Current Portfolio Floor": lump_floor_spx,
             })
+            if annual_alloc_choice_spx and col_clean == annual_alloc_choice_spx["clean"]:
+                selected_rows["SP500"] = rows[-1].copy()
+                selected_labels["SP500"] = PRETTY_SPX.get(col_clean, col_clean)
 
     # Build pretty maps and wide table
-    order_lbm = ['LBM 100E','LBM 90E','LBM 80E','LBM 70E','LBM 60E','LBM 50E','LBM 40E','LBM 30E','LBM 20E','LBM 10E','LBM 100F']
-    pretty_lbm = {'LBM 100E':'100% Equity','LBM 90E':'90% Equity','LBM 80E':'80% Equity','LBM 70E':'70% Equity',
-                  'LBM 60E':'60% Equity','LBM 50E':'50% Equity','LBM 40E':'40% Equity','LBM 30E':'30% Equity',
-                  'LBM 20E':'20% Equity','LBM 10E':'10% Equity','LBM 100F':'100% Fixed'}
-    order_spx = [f"spx{p}e" for p in [100,90,80,70,60,50,40,30,20,10,0]]
-    pretty_spx = {f"spx{p}e": f"{p}% Equity" for p in [100,90,80,70,60,50,40,30,20,10,0]}
 
     results = pd.DataFrame(rows)
     # Determine source for each row and generic label
     def _generic_label(a: str) -> str:
-        label = pretty_lbm.get(a, pretty_spx.get(a, a))
+        label = PRETTY_LBM.get(a, PRETTY_SPX.get(a, a))
         # Normalize 0% Equity (spx0e) to the shared row label used in the table
         if isinstance(label, str) and label.strip().startswith("0% Equity"):
             return "100% Fixed"
@@ -274,14 +491,11 @@ if have_any:
 
     def _build_wide(value_col: str) -> pd.DataFrame:
         w = tmp.pivot_table(index="Generic", columns="Source", values=value_col, aggfunc="first")
-        generic_order = ["100% Equity","90% Equity","80% Equity","70% Equity","60% Equity","50% Equity","40% Equity","30% Equity","20% Equity","10% Equity","100% Fixed"]
-        w = w.reindex([g for g in generic_order if g in w.index])
+        w = w.reindex([g for g in GENERIC_ORDER if g in w.index])
         w = w.rename_axis(None, axis=1).reset_index().rename(columns={"Generic":"Allocation"})
         return w
 
     wide_req = _build_wide("Required Annual")
-    wide_end = _build_wide("Ending Value")
-    wide_lump = _build_wide("Current Portfolio 100%")
 
     # Format for display
     display_results = wide_req.copy()
@@ -294,64 +508,115 @@ if have_any:
     if "SP500" in display_results.columns: cols.append("SP500")
     display_results = display_results[cols]
 
-    st.subheader("Results")
-    st.caption("Required Annual satisfies BOTH: Ideal Goal at Ideal Confidence AND Acceptable Goal at 100%.")
-    st.write(display_results)
+    # Current portfolio floor summary
+    if current_portfolio_value > 0:
+        floor_rows = []
+        floor_col_name = f"Floor ({current_conf_pct:.0f}%)"
+        if src_kind in ("LBM","BOTH") and lump_label.get("Global"):
+            floor_rows.append({
+                "Source": "Global",
+                "Allocation": lump_label["Global"],
+                floor_col_name: f"${lump_floor.get('Global', 0.0):,.0f}",
+            })
+        if src_kind in ("SPX","BOTH") and lump_label.get("SP500"):
+            floor_rows.append({
+                "Source": "SP500",
+                "Allocation": lump_label["SP500"],
+                floor_col_name: f"${lump_floor.get('SP500', 0.0):,.0f}",
+            })
+        if floor_rows:
+            st.subheader(f"Current Portfolio Floor ({current_conf_pct:.0f}% Confidence)")
+            st.caption("Historical outcome for today's balance at the selected confidence, assuming it remains in the chosen allocation.")
+            st.table(pd.DataFrame(floor_rows))
 
-    # Current portfolio only (100% confidence)
-    has_lump = not wide_lump.drop(columns=["Allocation"], errors="ignore").empty and \
-        wide_lump.drop(columns=["Allocation"], errors="ignore").notna().any().any()
-    if has_lump:
-        lump_display = wide_lump.copy()
-        for col in ["Global","SP500"]:
-            if col in lump_display.columns:
-                lump_display[col] = lump_display[col].apply(lambda x: f"${x:,.0f}" if pd.notna(x) else "")
-        lump_cols = ["Allocation"]
-        if "Global" in lump_display.columns: lump_cols.append("Global")
-        if "SP500" in lump_display.columns: lump_cols.append("SP500")
-        st.subheader("Current Portfolio Ending Value (100% Confidence)")
-        st.caption("Worst-case historical window outcome when investing the current portfolio alone (no new contributions).")
-        st.write(lump_display[lump_cols])
+    summary_rows = []
+    for source in ["Global","SP500"]:
+        sel = selected_rows.get(source)
+        if not sel:
+            continue
+        req = sel.get("Required Annual")
+        end_val = sel.get("Ending Value")
+        summary_rows.append({
+            "Source": source,
+            "Annual Allocation": selected_labels.get(source) or sel.get("Allocation"),
+            "Required Annual": "" if req is None or not np.isfinite(req) else f"${req:,.0f}",
+            "Current Allocation": lump_label.get(source) or "—",
+            f"Current Floor ({current_conf_pct:.0f}%)": f"${lump_floor.get(source, 0.0):,.0f}",
+            f"Ending Value @ {conf_pct_ideal:.0f}%": "" if end_val is None or not np.isfinite(end_val) else f"${end_val:,.0f}",
+        })
+    if summary_rows:
+        st.subheader("Selected Allocation Results")
+        st.caption("Compares the chosen annual contribution allocation with the current-portfolio floor.")
+        st.table(pd.DataFrame(summary_rows))
+    else:
+        st.info("Select at least one annual contribution allocation above to view results.")
 
-    # Combined ending values table
-    has_endings = not wide_end.drop(columns=["Allocation"], errors="ignore").empty and \
-        wide_end.drop(columns=["Allocation"], errors="ignore").notna().any().any()
-    if has_endings:
-        ending_display = wide_end.copy()
-        for col in ["Global","SP500"]:
-            if col in ending_display.columns:
-                ending_display[col] = ending_display[col].apply(lambda x: f"${x:,.0f}" if pd.notna(x) else "")
-        end_cols = ["Allocation"]
-        if "Global" in ending_display.columns: end_cols.append("Global")
-        if "SP500" in ending_display.columns: end_cols.append("SP500")
-        st.subheader("Ending Value (Current Portfolio + Required Annual)")
-        st.caption(f"{conf_pct_ideal}% confidence ending balance when combining today's portfolio (${current_portfolio_value:,.0f}) with the required annual contribution.")
-        st.write(ending_display[end_cols])
+    solver_rows_display = st.session_state.get("solver_rows_display")
+    if solver_rows_display:
+        solver_df = pd.DataFrame(solver_rows_display)
+        for col in ["Floor","Required Annual","Ending Value"]:
+            if col in solver_df.columns:
+                solver_df[col] = solver_df[col].apply(lambda x: f"${x:,.0f}" if pd.notna(x) else "")
+        st.subheader("Solver Recommendation")
+        st.caption("These allocations were applied to the selectors above to minimize the required annual contribution.")
+        st.table(solver_df.drop(columns=["current_clean","annual_clean"], errors="ignore"))
+        if st.button("Clear solver recommendation", key="clear_solver"):
+            st.session_state["solver_rows_display"] = None
+            _rerun()
 
     # ------------------------------------------------------------
-    # Failure Distribution (when investing the Required Annual) for cheapest allocation(s)
+    # Optimization helper (optional)
     # ------------------------------------------------------------
-    st.markdown("#### Failure Distribution (when investing the Required Annual)")
-    st.caption("Includes today's portfolio value compounding through each historical window.")
+    st.markdown("#### Optimization (Min Required Annual)")
+
+    def _solve_source(source_label, metas):
+        if not metas:
+            return None
+        best = None
+        for current_meta in metas:
+            floor_val = _floor_for_choice(source_label, current_meta)
+            shortfall_ideal = max(float(ideal_goal) - floor_val, 0.0)
+            shortfall_accept = max(float(acceptable_goal) - floor_val, 0.0)
+            for annual_meta in metas:
+                evs_arr = calc_cache[source_label].get(annual_meta["clean"], {}).get("evs")
+                if evs_arr is None or evs_arr.size == 0:
+                    continue
+                req_i = required_annual_for_goal(evs_arr, shortfall_ideal, float(ideal_conf_level))
+                req_a = required_annual_for_goal(evs_arr, shortfall_accept, 1.0)
+                req = max(req_i, req_a)
+                if not np.isfinite(req):
+                    continue
+                total_arr = evs_arr * float(req)
+                ending_val = float('nan')
+                if total_arr.size:
+                    ending_val = _quantile_linear(np.array(total_arr, dtype=float), ideal_tail) + floor_val
+                entry = {
+                    "Source": source_label,
+                    "Current Allocation": PRETTY_LBM.get(current_meta["clean"], current_meta["clean"]) if source_label == "Global" else PRETTY_SPX.get(current_meta["clean"], current_meta["clean"]),
+                    "Annual Allocation": PRETTY_LBM.get(annual_meta["clean"], annual_meta["clean"]) if source_label == "Global" else PRETTY_SPX.get(annual_meta["clean"], annual_meta["clean"]),
+                    "Floor": floor_val,
+                    "Required Annual": float(req),
+                    "Ending Value": ending_val,
+                }
+                if best is None or entry["Required Annual"] < best["Required Annual"]:
+                    best = entry
+        return best
+
+
+    # ------------------------------------------------------------
+    # Failure Distribution (when investing the Required Annual) for selected allocation(s)
+    # ------------------------------------------------------------
+    st.markdown("#### Failure Distribution (Selected Allocation)")
+    st.caption(f"Adds the {current_conf_pct:.0f}% confidence current-portfolio floor to each outcome before measuring failures.")
     failure_rows = []
 
-    # Build maps from generic label -> raw column for each source
-    inv_lbm = {v: k for k, v in pretty_lbm.items()}    # e.g., "60% Equity" -> "LBM 60E"
-    inv_spx = {v: k for k, v in pretty_spx.items()}    # e.g., "60% Equity" -> "spx60e"
-    # Normalize: generic "100% Fixed" maps to LBM 100F and spx0e where applicable
-    if "100% Fixed" not in inv_lbm and "LBM 100F" in pretty_lbm:
-        inv_lbm["100% Fixed"] = "LBM 100F"
-    if "100% Fixed" not in inv_spx and "spx0e" in pretty_spx:
-        inv_spx["100% Fixed"] = "spx0e"
-
-    def _failure_stats_ann(raw_col: str, stats: dict, required_amt: float, label_source: str):
+    def _failure_stats_ann(raw_col: str, stats: dict, required_amt: float, label_source: str, floor_val: float):
         evs_arr = stats.get("evs") if stats else None
-        lumps_arr = stats.get("lumps") if stats else None
         if evs_arr is None or evs_arr.size == 0 or not np.isfinite(required_amt):
             return
         arr = np.array(evs_arr, dtype=float) * float(required_amt)
-        if current_portfolio_value > 0 and lumps_arr is not None and lumps_arr.size == arr.size:
-            arr = arr + np.array(lumps_arr, dtype=float) * float(current_portfolio_value)
+        if floor_val:
+            arr = arr + float(floor_val)
         total = int(arr.size)
         fails = arr < float(ideal_goal)
         num_fail = int(fails.sum())
@@ -385,34 +650,31 @@ if have_any:
             "P75": f"${p75:,.0f}",
         })
 
-    # Identify cheapest (min required annual) allocation per source and compute failures
-    # Global
-    if "Global" in wide_req.columns and wide_req["Global"].notna().any():
-        gidx = wide_req["Global"].idxmin()
-        generic_g = wide_req.loc[gidx, "Allocation"]
-        raw_g = inv_lbm.get(generic_g)
-        req_amt_g = wide_req.loc[gidx, "Global"]
-        stats_g = calc_cache["Global"].get(raw_g) if raw_g else None
-        if raw_g and stats_g:
-            _failure_stats_ann(raw_g, stats_g, req_amt_g, "Global")
-    # SP500
-    if "SP500" in wide_req.columns and wide_req["SP500"].notna().any():
-        sidx = wide_req["SP500"].idxmin()
-        generic_s = wide_req.loc[sidx, "Allocation"]
-        raw_s = inv_spx.get(generic_s)
-        req_amt_s = wide_req.loc[sidx, "SP500"]
-        stats_s = calc_cache["SP500"].get(raw_s) if raw_s else None
-        if raw_s and stats_s:
-            _failure_stats_ann(raw_s, stats_s, req_amt_s, "SP500")
+    # Analyze selected annual allocations
+    def _run_failure_for_source(source: str, choice_meta):
+        if not choice_meta:
+            return
+        raw_col = choice_meta["clean"]
+        stats = calc_cache[source].get(raw_col)
+        sel = selected_rows.get(source)
+        if not stats or not sel:
+            return
+        req_amt = sel.get("Required Annual")
+        if req_amt is None or not np.isfinite(req_amt):
+            return
+        _failure_stats_ann(raw_col, stats, float(req_amt), source, lump_floor.get(source, 0.0))
+
+    _run_failure_for_source("Global", annual_alloc_choice_global)
+    _run_failure_for_source("SP500", annual_alloc_choice_spx)
 
     if failure_rows:
         fail_df = pd.DataFrame(failure_rows)
         # Friendlier allocation label in output
         def _friendly_alloc_fail(raw_name, source):
             if source == "Global":
-                return pretty_lbm.get(raw_name, raw_name)
+                return PRETTY_LBM.get(raw_name, raw_name)
             else:
-                return pretty_spx.get(raw_name, raw_name)
+                return PRETTY_SPX.get(raw_name, raw_name)
         fail_df["Allocation"] = fail_df.apply(lambda r: _friendly_alloc_fail(r["Allocation"], r["Source"]), axis=1)
         st.data_editor(
             fail_df,
@@ -421,7 +683,7 @@ if have_any:
             use_container_width=True,
             column_config={
                 "Source": st.column_config.TextColumn("Source", help="Data source used."),
-                "Allocation": st.column_config.TextColumn("Allocation", help="Cheapest allocation at current settings."),
+                "Allocation": st.column_config.TextColumn("Allocation", help="Selected annual allocation at current settings."),
                 "Windows": st.column_config.NumberColumn("Windows", help="Number of valid rolling windows."),
                 "Failures": st.column_config.NumberColumn("Failures", help="Count of windows that ended below Ideal Goal."),
                 "Failure Rate": st.column_config.TextColumn("Failure Rate", help="Failures / Windows."),
@@ -432,23 +694,22 @@ if have_any:
             }
         )
     else:
-        st.info("No failures at the selected confidence for the cheapest allocation(s).")
+        st.info("No failures at the selected settings for the chosen allocation(s).")
 
     # ------------------------------------------------------------
-    # Success Distribution (when investing the Required Annual) for cheapest allocation(s)
+    # Success Distribution (when investing the Required Annual) for selected allocation(s)
     # ------------------------------------------------------------
-    st.markdown("#### Success Distribution (when investing the Required Annual)")
-    st.caption("Same combined balance: current portfolio plus required annual contributions.")
+    st.markdown("#### Success Distribution (Selected Allocation)")
+    st.caption(f"Same combined balance: required annual contributions plus the {current_conf_pct:.0f}% confidence current-portfolio floor.")
     success_rows = []
 
-    def _success_stats_ann(raw_col: str, stats: dict, required_amt: float, label_source: str):
+    def _success_stats_ann(raw_col: str, stats: dict, required_amt: float, label_source: str, floor_val: float):
         evs_arr = stats.get("evs") if stats else None
-        lumps_arr = stats.get("lumps") if stats else None
         if evs_arr is None or evs_arr.size == 0 or not np.isfinite(required_amt):
             return
         arr = np.array(evs_arr, dtype=float) * float(required_amt)
-        if current_portfolio_value > 0 and lumps_arr is not None and lumps_arr.size == arr.size:
-            arr = arr + np.array(lumps_arr, dtype=float) * float(current_portfolio_value)
+        if floor_val:
+            arr = arr + float(floor_val)
         total = int(arr.size)
         succ_mask = arr >= float(ideal_goal)
         num_succ = int(succ_mask.sum())
@@ -485,31 +746,29 @@ if have_any:
             "Best": f"${best:,.0f}",
         })
 
-    # Compute success stats for the same cheapest allocations
-    if "Global" in wide_req.columns and wide_req["Global"].notna().any():
-        gidx = wide_req["Global"].idxmin()
-        generic_g = wide_req.loc[gidx, "Allocation"]
-        raw_g = inv_lbm.get(generic_g)
-        req_amt_g = wide_req.loc[gidx, "Global"]
-        stats_g = calc_cache["Global"].get(raw_g) if raw_g else None
-        if raw_g and stats_g:
-            _success_stats_ann(raw_g, stats_g, req_amt_g, "Global")
-    if "SP500" in wide_req.columns and wide_req["SP500"].notna().any():
-        sidx = wide_req["SP500"].idxmin()
-        generic_s = wide_req.loc[sidx, "Allocation"]
-        raw_s = inv_spx.get(generic_s)
-        req_amt_s = wide_req.loc[sidx, "SP500"]
-        stats_s = calc_cache["SP500"].get(raw_s) if raw_s else None
-        if raw_s and stats_s:
-            _success_stats_ann(raw_s, stats_s, req_amt_s, "SP500")
+    def _run_success_for_source(source: str, choice_meta):
+        if not choice_meta:
+            return
+        raw_col = choice_meta["clean"]
+        stats = calc_cache[source].get(raw_col)
+        sel = selected_rows.get(source)
+        if not stats or not sel:
+            return
+        req_amt = sel.get("Required Annual")
+        if req_amt is None or not np.isfinite(req_amt):
+            return
+        _success_stats_ann(raw_col, stats, float(req_amt), source, lump_floor.get(source, 0.0))
+
+    _run_success_for_source("Global", annual_alloc_choice_global)
+    _run_success_for_source("SP500", annual_alloc_choice_spx)
 
     if success_rows:
         succ_df = pd.DataFrame(success_rows)
         def _friendly_alloc_succ(raw_name, source):
             if source == "Global":
-                return pretty_lbm.get(raw_name, raw_name)
+                return PRETTY_LBM.get(raw_name, raw_name)
             else:
-                return pretty_spx.get(raw_name, raw_name)
+                return PRETTY_SPX.get(raw_name, raw_name)
         succ_df["Allocation"] = succ_df.apply(lambda r: _friendly_alloc_succ(r["Allocation"], r["Source"]), axis=1)
         st.data_editor(
             succ_df,
@@ -518,7 +777,7 @@ if have_any:
             use_container_width=True,
             column_config={
                 "Source": st.column_config.TextColumn("Source", help="Data source used."),
-                "Allocation": st.column_config.TextColumn("Allocation", help="Cheapest allocation at current settings."),
+                "Allocation": st.column_config.TextColumn("Allocation", help="Selected annual allocation at current settings."),
                 "Windows": st.column_config.NumberColumn("Windows", help="Number of valid rolling windows."),
                 "Successes": st.column_config.NumberColumn("Successes", help="Count of windows that ended at/above Ideal Goal."),
                 "Success Rate": st.column_config.TextColumn("Success Rate", help="Successes / Windows."),
@@ -530,9 +789,9 @@ if have_any:
             }
         )
     else:
-        st.info("No successes found (this would occur only at very high fees or extreme settings).")
+        st.info("No successes found at the selected settings for the chosen allocation(s).")
 
-    # Charts (separate), highlight lowest bar
+    # Charts (separate), highlight selected allocation (fallback to minimum if none)
     chart_df = wide_req.copy()
     if not chart_df.empty:
         n = len(chart_df)
@@ -540,7 +799,11 @@ if have_any:
         if "Global" in chart_df.columns and chart_df["Global"].notna().any():
             g_vals = chart_df["Global"]
             g_colors = ["#9ecae1"] * n
-            if g_vals.notna().any():
+            target_label = selected_labels.get("Global")
+            if target_label and target_label in chart_df["Allocation"].values:
+                g_target_idx = chart_df.index[chart_df["Allocation"] == target_label][0]
+                g_colors[g_target_idx] = "#2ca02c"
+            elif g_vals.notna().any():
                 g_min_pos = g_vals[g_vals.notna()].idxmin()
                 try: g_i = chart_df.index.get_loc(g_min_pos)
                 except Exception: g_i = int(g_min_pos) if isinstance(g_min_pos,(int,np.integer)) else None
@@ -554,7 +817,11 @@ if have_any:
         if "SP500" in chart_df.columns and chart_df["SP500"].notna().any():
             s_vals = chart_df["SP500"]
             s_colors = ["#3182bd"] * n
-            if s_vals.notna().any():
+            target_label = selected_labels.get("SP500")
+            if target_label and target_label in chart_df["Allocation"].values:
+                s_target_idx = chart_df.index[chart_df["Allocation"] == target_label][0]
+                s_colors[s_target_idx] = "#D95F02"
+            elif s_vals.notna().any():
                 s_min_pos = s_vals[s_vals.notna()].idxmin()
                 try: s_i = chart_df.index.get_loc(s_min_pos)
                 except Exception: s_i = int(s_min_pos) if isinstance(s_min_pos,(int,np.integer)) else None
