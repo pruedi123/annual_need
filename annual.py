@@ -45,25 +45,25 @@ with col1:
         index=0,
         help="Choose the factor set: LBM workbook (Excel) or S&P 500 workbook (spx_factors.xlsx).",
     )
-    ideal_goal = st.number_input("Ideal Goal ($)", min_value=1, step=50000, value=3_000_000,
+    ideal_goal = st.number_input("Ideal Goal ($)", min_value=1, step=50000, value=2_500_000,
                                  help="Today’s dollars: same buying power as money today.",
                                  format="%i")
-    conf_pct_ideal = st.slider("Ideal Confidence (%)", min_value=50, step= 10, max_value=100, value=100,
+    conf_pct_ideal = st.slider("Ideal Confidence (%)", min_value=50, step= 10, max_value=100, value=90,
                                help="e.g., 90% means ≥90% of historical windows finish at/above the Ideal Goal.")
     ideal_conf_level = conf_pct_ideal / 100.0
 with col2:
-    num_years = st.number_input("Years", min_value=1, max_value=60, value=30)
-    acceptable_goal = st.number_input("Essential Goal ($)", min_value=1, step=50000, value=2_500_000,
+    num_years = st.number_input("Years", min_value=1, max_value=60, value=4)
+    acceptable_goal = st.number_input("Essential Goal ($)", min_value=1, step=50000, value=2_000_000,
                                       help="A minimum acceptable outcome (floor) sized at 100% confidence.",
                                       format="%i")
     current_portfolio_value = st.number_input(
-        "Current Portfolio Value ($)", min_value=0, step=50_000, value=0,
+        "Current Portfolio Value ($)", min_value=0, step=50_000, value=2000000,
         help="How much is already invested today. It compounds through the historical windows alongside new contributions.",
         format="%i"
     )
     current_conf_pct = st.slider(
         "Current Portfolio Confidence (%)",
-        min_value=50, max_value=100, value=100, step=5,
+        min_value=50, max_value=100, value=95, step=5,
         help="Use less than 100% to size the already-invested portfolio at, say, the 90% (10th percentile) outcome.",
     )
     acceptable_conf_level = 1.0  # fixed 100%
