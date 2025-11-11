@@ -64,7 +64,7 @@ with col2:
     )
     current_conf_pct = st.slider(
         "Current Portfolio Confidence (%)",
-        min_value=50, max_value=100, value=95, step=5,
+        min_value=50, max_value=100, value=95, step=1,
         help="Use less than 100% to size the already-invested portfolio at, say, the 90% (10th percentile) outcome.",
     )
     acceptable_conf_level = 1.0  # fixed 100%
