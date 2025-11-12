@@ -555,7 +555,11 @@ if have_any:
                 "Allocation": label,
                 floor_col_name: f"${lump_floor.get('Global', 0.0):,.0f}",
             })
-            floor_descriptions.append(f"Global: {_fmt_currency(lump_floor.get('Global', 0.0))} at {label}")
+            floor_descriptions.append({
+                "source": "Global",
+                "amount": _fmt_currency(lump_floor.get("Global", 0.0)),
+                "label": label
+            })
         if src_kind in ("SPX","BOTH") and lump_label.get("SP500"):
             label = lump_label.get("SP500") or "selected allocation"
             floor_rows.append({
@@ -563,7 +567,11 @@ if have_any:
                 "Allocation": label,
                 floor_col_name: f"${lump_floor.get('SP500', 0.0):,.0f}",
             })
-            floor_descriptions.append(f"SP500: {_fmt_currency(lump_floor.get('SP500', 0.0))} at {label}")
+            floor_descriptions.append({
+                "source": "SP500",
+                "amount": _fmt_currency(lump_floor.get("SP500", 0.0)),
+                "label": label
+            })
         if show_outputs and floor_rows:
             st.subheader(f"Current Portfolio Floor ({current_conf_pct:.0f}% Confidence)")
             st.caption("Historical outcome for today's balance, assuming it remains in the chosen allocation.")
@@ -860,9 +868,12 @@ if have_any:
         st.subheader("Result Explanation (plain text)")
         if floor_descriptions:
             tail_pct = max(0.0, 100 - float(current_conf_pct))
-            floors_list = ", ".join(floor_descriptions)
+            desc_text = " | ".join(
+                f"{desc['source']}: below {desc['amount']} with {desc['label']}"
+                for desc in floor_descriptions
+            )
             st.text(
-                f"Based on your confidence choice of {current_conf_pct:.0f}%, there is only about a {tail_pct:.0f}% chance the current portfolio ends below the floor amounts shown ({floors_list}).\n"
+                f"Based on your confidence choice of {current_conf_pct:.0f}%, there is only about a {tail_pct:.0f}% chance the current portfolio ends below the floor amounts described ({desc_text}).\n"
                 f"We treat that floor as money already in hand, then size the required annual payments so the Ideal Goal is met at {conf_pct_ideal:.0f}% confidence."
             )
         for det in summary_details:
