@@ -560,32 +560,32 @@ if have_any:
 
     summary_rows = []
     summary_details = []
+    for source in ["Global","SP500"]:
+        sel = selected_rows.get(source)
+        if not sel:
+            continue
+        req = sel.get("Required Annual")
+        end_val = sel.get("Ending Value")
+        floor_val = lump_floor.get(source, 0.0)
+        current_label = lump_label.get(source) or "—"
+        annual_label = selected_labels.get(source) or (sel.get("Allocation") if sel else "—")
+        summary_rows.append({
+            "Source": source,
+            "Annual Allocation": annual_label,
+            "Required Annual": "" if req is None or not np.isfinite(req) else f"${req:,.0f}",
+            "Current Allocation": current_label,
+            f"Current Floor ({current_conf_pct:.0f}%)": f"${floor_val:,.0f}",
+            f"Ending Value @ {conf_pct_ideal:.0f}%": "" if end_val is None or not np.isfinite(end_val) else f"${end_val:,.0f}",
+        })
+        summary_details.append({
+            "source": source,
+            "current_label": current_label,
+            "annual_label": annual_label,
+            "floor": floor_val,
+            "required": req if req is not None and np.isfinite(req) else None,
+            "ending": end_val if end_val is not None and np.isfinite(end_val) else None,
+        })
     if show_outputs:
-        for source in ["Global","SP500"]:
-            sel = selected_rows.get(source)
-            if not sel:
-                continue
-            req = sel.get("Required Annual")
-            end_val = sel.get("Ending Value")
-            floor_val = lump_floor.get(source, 0.0)
-            current_label = lump_label.get(source) or "—"
-            annual_label = selected_labels.get(source) or (sel.get("Allocation") if sel else "—")
-            summary_rows.append({
-                "Source": source,
-                "Annual Allocation": annual_label,
-                "Required Annual": "" if req is None or not np.isfinite(req) else f"${req:,.0f}",
-                "Current Allocation": current_label,
-                f"Current Floor ({current_conf_pct:.0f}%)": f"${floor_val:,.0f}",
-                f"Ending Value @ {conf_pct_ideal:.0f}%": "" if end_val is None or not np.isfinite(end_val) else f"${end_val:,.0f}",
-            })
-            summary_details.append({
-                "source": source,
-                "current_label": current_label,
-                "annual_label": annual_label,
-                "floor": floor_val,
-                "required": req if req is not None and np.isfinite(req) else None,
-                "ending": end_val if end_val is not None and np.isfinite(end_val) else None,
-            })
         if summary_rows:
             st.subheader("Selected Allocation Results")
             st.caption("Compares the chosen annual contribution allocation with the current-portfolio floor.")
