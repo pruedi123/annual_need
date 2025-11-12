@@ -51,7 +51,7 @@ ideal_goal = sb.number_input(
     format="%i"
 )
 conf_pct_ideal = sb.slider(
-    "Ideal Confidence (%)", min_value=50, step=10, max_value=100, value=90,
+    "Ideal Confidence (%)", min_value=50, step=5, max_value=100, value=90,
     help="e.g., 90% means ≥90% of historical simulations (audits) finish at/above the Ideal Goal."
 )
 ideal_conf_level = conf_pct_ideal / 100.0
