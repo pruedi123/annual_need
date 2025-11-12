@@ -843,7 +843,7 @@ if have_any:
         else:
             st.info("No successes found at the selected settings for the chosen allocation(s).")
 
-    if show_outputs and summary_details:
+    if summary_details:
         fail_lookup = {r["Source"]: r for r in failure_rows}
         succ_lookup = {r["Source"]: r for r in success_rows}
         st.subheader("Result Explanation (plain text)")
