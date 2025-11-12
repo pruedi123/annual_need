@@ -870,9 +870,10 @@ if have_any:
             tail_pct = max(0.0, 100 - float(current_conf_pct))
             for desc in floor_descriptions:
                 st.text(
-                    f"Based on your confidence choice of {current_conf_pct:.0f}%, there is only about a {tail_pct:.0f}% chance the CURRENT PORTFOLIO ends below the floor amount {desc['amount']} with a {desc['label']} allocation in {desc['source']}."
+                    f"Your existing retirement savings will be invested conservatively in {desc['label']}. "
+                    f"This gives you a safety net of about {desc['amount']}—money we're {current_conf_pct:.0f}% confident will be there "
+                    f"(only about a {tail_pct:.0f}% chance it ends below that floor in {desc['source']})."
                 )
-            st.text(f"We treat that floor as money already in hand, then size the required annual payments so the Ideal Goal is met at {conf_pct_ideal:.0f}% confidence.")
         for det in summary_details:
             src = det["source"]
             req_text = _fmt_currency(det["required"])
@@ -884,10 +885,9 @@ if have_any:
             num_fail = fail.get("Failures Raw", 0)
             worst_txt = fail.get("Worst", "N/A")
             median_txt = fail.get("Median", "N/A")
-            st.text(f"To achieve your goal under current terms, you will need to invest {req_text} each year for {int(num_years)} years in a {src} {det['annual_label']} portfolio.")
-            st.text(f"In summary, the Current Portfolio would be invested in {det['current_label']} and the Required Annual Contributions should be invested in {det['annual_label']}.")
-            st.text(f"Historically, that mix met the Ideal goal of ${ideal_goal:,.0f} with a success rate of {success_rate}; the median outcome was {p25_text}.")
-            st.text(f"About {failure_rate} of historical audits (roughly {num_fail} simulations) fell short—the worst ending value was {worst_txt} and the typical shortfall (median failure) was {median_txt}.")
+            st.text(f"To reach your ${ideal_goal:,.0f} goal, you'll need to add {req_text} per year for {int(num_years)} years, invested in the {src} {det['annual_label']} portfolio.")
+            st.text(f"Historically, 9 out of 10 windows hit or beat the goal (success rate {success_rate}); the typical outcome (median success) was {p25_text}.")
+            st.text(f"In the rare misses (~{failure_rate}, or {num_fail} windows), the worst ending value was {worst_txt} and the typical shortfall (median failure) was {median_txt}.")
 
     # Charts (separate), highlight selected allocation (fallback to minimum if none)
     if show_outputs:
