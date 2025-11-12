@@ -396,11 +396,11 @@ sb.markdown("### Solver / Display")
 if sb.button("Apply Manual Selection", use_container_width=True):
     st.session_state["solver_rows_display"] = None
     _rerun()
-run_solver = sb.button("Run Solver (Min Required Annual)", use_container_width=True)
+run_solver = sb.button("Let the app pick an allocation for me", use_container_width=True)
 show_outputs = sb.radio(
     "View detailed results?",
     options=["Show", "Hide"],
-    index=0,
+    index=1,
     horizontal=True,
     key="toggle_outputs"
 ) == "Show"
