@@ -68,7 +68,8 @@ with col2:
         help=(
             "Think of this as how conservative you want to be with the money you already have. "
             "At 100%, you only credit yourself with the very worst historical outcome. "
-            "At 90%, you say “I’m comfortable assuming my current savings will at least match what happened in 9 out of 10 similar periods,” "
+            "At 99%, you say “I’m comfortable assuming my current savings will at least match what happened in 99 out of 100 similar periods,” "
+            "or in other words, only 1% of historical windows would have produced less than this amount. "
             "which gives more credit to today’s balance and shrinks the required annual contribution."
         ),
     )
