@@ -594,7 +594,7 @@ if have_any:
             st.info("Select at least one annual contribution allocation above to view results.")
 
     solver_rows_display = st.session_state.get("solver_rows_display")
-    if solver_rows_display:
+    if show_outputs and solver_rows_display:
         solver_df = pd.DataFrame(solver_rows_display)
         for col in ["Floor","Required Annual","Ending Value"]:
             if col in solver_df.columns:
