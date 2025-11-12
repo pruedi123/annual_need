@@ -813,36 +813,37 @@ if have_any:
     _run_success_for_source("Global", annual_alloc_choice_global)
     _run_success_for_source("SP500", annual_alloc_choice_spx)
 
-    if success_rows:
-        succ_df = pd.DataFrame(success_rows)
-        def _friendly_alloc_succ(raw_name, source):
-            if source == "Global":
-                return PRETTY_LBM.get(raw_name, raw_name)
-            else:
-                return PRETTY_SPX.get(raw_name, raw_name)
-        succ_df["Allocation"] = succ_df.apply(lambda r: _friendly_alloc_succ(r["Allocation"], r["Source"]), axis=1)
-        st.data_editor(
-            succ_df,
-            hide_index=True,
-            disabled=True,
-            width="stretch",
-            column_config={
-                "Source": st.column_config.TextColumn("Source", help="Data source used."),
-                "Allocation": st.column_config.TextColumn("Allocation", help="Selected annual allocation at current settings."),
-                "Windows": st.column_config.NumberColumn("Windows", help="Number of valid rolling windows."),
-                "Successes": st.column_config.NumberColumn("Successes", help="Count of windows that ended at/above Ideal Goal."),
-                "Success Rate": st.column_config.TextColumn("Success Rate", help="Successes / Windows."),
-                "Min": st.column_config.TextColumn("Min", help="Worst ending value among successes (still ≥ Ideal Goal)."),
-                "P25": st.column_config.TextColumn("P25", help="25th percentile of successful endings."),
-                "Median": st.column_config.TextColumn("Median", help="Median successful ending value."),
-                "P75": st.column_config.TextColumn("P75", help="75th percentile of successful endings."),
-                "Best": st.column_config.TextColumn("Best", help="Best ending value among successes."),
-            }
-        )
-    else:
-        st.info("No successes found at the selected settings for the chosen allocation(s).")
+    if show_outputs:
+        if success_rows:
+            succ_df = pd.DataFrame(success_rows)
+            def _friendly_alloc_succ(raw_name, source):
+                if source == "Global":
+                    return PRETTY_LBM.get(raw_name, raw_name)
+                else:
+                    return PRETTY_SPX.get(raw_name, raw_name)
+            succ_df["Allocation"] = succ_df.apply(lambda r: _friendly_alloc_succ(r["Allocation"], r["Source"]), axis=1)
+            st.data_editor(
+                succ_df,
+                hide_index=True,
+                disabled=True,
+                width="stretch",
+                column_config={
+                    "Source": st.column_config.TextColumn("Source", help="Data source used."),
+                    "Allocation": st.column_config.TextColumn("Allocation", help="Selected annual allocation at current settings."),
+                    "Windows": st.column_config.NumberColumn("Windows", help="Number of valid rolling windows."),
+                    "Successes": st.column_config.NumberColumn("Successes", help="Count of windows that ended at/above Ideal Goal."),
+                    "Success Rate": st.column_config.TextColumn("Success Rate", help="Successes / Windows."),
+                    "Min": st.column_config.TextColumn("Min", help="Worst ending value among successes (still ≥ Ideal Goal)."),
+                    "P25": st.column_config.TextColumn("P25", help="25th percentile of successful endings."),
+                    "Median": st.column_config.TextColumn("Median", help="Median successful ending value."),
+                    "P75": st.column_config.TextColumn("P75", help="75th percentile of successful endings."),
+                    "Best": st.column_config.TextColumn("Best", help="Best ending value among successes."),
+                }
+            )
+        else:
+            st.info("No successes found at the selected settings for the chosen allocation(s).")
 
-    if summary_details:
+    if show_outputs and summary_details:
         fail_lookup = {r["Source"]: r for r in failure_rows}
         succ_lookup = {r["Source"]: r for r in success_rows}
         st.subheader("Result Explanation (plain text)")
