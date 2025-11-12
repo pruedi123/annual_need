@@ -81,7 +81,7 @@ with col2:
     acceptable_conf_level = 1.0  # fixed 100%
 with col3:
     fee_pct = st.slider("Annual fee (%)", min_value=0.0, max_value=1.0, value=0.20, step=0.1,
-                        help="Applied once per 12-month factor: net = gross × (1 − fee).")
+                        help="Applied once per 12-month factor: net = gross × (1 − fee). 0.20 % = 20 basis points.")
 
 row_increment = 12  # Data is monthly, so step 12 rows per year
 
