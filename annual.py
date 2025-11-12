@@ -887,7 +887,7 @@ if have_any:
             st.text(f"To achieve your goal under current terms, you will need to invest {req_text} each year for {int(num_years)} years in a {src} {det['annual_label']} portfolio.")
             st.text(f"In summary, the Current Portfolio would be invested in {det['current_label']} and the Required Annual Contributions should be invested in {det['annual_label']}.")
             st.text(f"Historically, that mix met the Ideal goal of ${ideal_goal:,.0f} with a success rate of {success_rate}; the median outcome was {p25_text}.")
-            st.text(f"About {failure_rate} of windows (roughly {num_fail} simulations) fell short—the worst ending value was {worst_txt} and the typical shortfall (median failure) was {median_txt}.")
+            st.text(f"About {failure_rate} of historical audits (roughly {num_fail} simulations) fell short—the worst ending value was {worst_txt} and the typical shortfall (median failure) was {median_txt}.")
 
     # Charts (separate), highlight selected allocation (fallback to minimum if none)
     if show_outputs:
