@@ -860,7 +860,7 @@ if have_any:
             tail_pct = max(0.0, 100 - float(current_conf_pct))
             floors_list = ", ".join(floor_descriptions)
             st.text(
-                f"Based on your confidence choice of {current_conf_pct:.0f}%, there is only about a {tail_pct:.0f}% chance the current portfolio ends below the floor amounts shown ({floors_list}). "
+                f"Based on your confidence choice of {current_conf_pct:.0f}%, there is only about a {tail_pct:.0f}% chance the current portfolio ends below the floor amounts shown ({floors_list}).\n"
                 f"We treat that floor as money already in hand, then size the required annual payments so the Ideal Goal is met at {conf_pct_ideal:.0f}% confidence."
             )
         for det in summary_details:
@@ -874,13 +874,10 @@ if have_any:
             num_fail = fail.get("Failures Raw", 0)
             worst_txt = fail.get("Worst", "N/A")
             median_txt = fail.get("Median", "N/A")
-            explanation = (
-                f"{src}: To achieve your goal under current terms, you will need to invest {req_text} each year for {int(num_years)} years. "
-                f"The current allocation would be {det['current_label']} and the required annual contributions stay in {det['annual_label']}. "
-                f"Historically, that mix met the Ideal goal of ${ideal_goal:,.0f} with a success rate of {success_rate}; the median outcome was {p25_text}. "
-                f"About {failure_rate} of windows (roughly {num_fail} simulations) fell short—the worst ending value was {worst_txt} and the typical shortfall (median failure) was {median_txt}."
-            )
-            st.text(explanation)
+            st.text(f"{src}: To achieve your goal under current terms, you will need to invest {req_text} each year for {int(num_years)} years.")
+            st.text(f"The current allocation would be {det['current_label']} and the required annual contributions stay in {det['annual_label']}.")
+            st.text(f"Historically, that mix met the Ideal goal of ${ideal_goal:,.0f} with a success rate of {success_rate}; the median outcome was {p25_text}.")
+            st.text(f"About {failure_rate} of windows (roughly {num_fail} simulations) fell short—the worst ending value was {worst_txt} and the typical shortfall (median failure) was {median_txt}.")
 
     # Charts (separate), highlight selected allocation (fallback to minimum if none)
     if show_outputs:
