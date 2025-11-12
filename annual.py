@@ -549,19 +549,21 @@ if have_any:
     if current_portfolio_value > 0:
         floor_col_name = f"Floor ({current_conf_pct:.0f}%)"
         if src_kind in ("LBM","BOTH") and lump_label.get("Global"):
+            label = lump_label.get("Global") or "selected allocation"
             floor_rows.append({
                 "Source": "Global",
-                "Allocation": lump_label["Global"],
+                "Allocation": label,
                 floor_col_name: f"${lump_floor.get('Global', 0.0):,.0f}",
             })
-            floor_descriptions.append(f"Global: {_fmt_currency(lump_floor.get('Global', 0.0))}")
+            floor_descriptions.append(f"Global: {_fmt_currency(lump_floor.get('Global', 0.0))} at {label}")
         if src_kind in ("SPX","BOTH") and lump_label.get("SP500"):
+            label = lump_label.get("SP500") or "selected allocation"
             floor_rows.append({
                 "Source": "SP500",
-                "Allocation": lump_label["SP500"],
+                "Allocation": label,
                 floor_col_name: f"${lump_floor.get('SP500', 0.0):,.0f}",
             })
-            floor_descriptions.append(f"SP500: {_fmt_currency(lump_floor.get('SP500', 0.0))}")
+            floor_descriptions.append(f"SP500: {_fmt_currency(lump_floor.get('SP500', 0.0))} at {label}")
         if show_outputs and floor_rows:
             st.subheader(f"Current Portfolio Floor ({current_conf_pct:.0f}% Confidence)")
             st.caption("Historical outcome for today's balance, assuming it remains in the chosen allocation.")
