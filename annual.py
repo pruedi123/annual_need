@@ -648,8 +648,9 @@ if have_any:
     # ------------------------------------------------------------
     # Failure Distribution (when investing the Required Annual) for selected allocation(s)
     # ------------------------------------------------------------
-    st.markdown("#### Failure Distribution (Selected Allocation)")
-    st.caption(f"Adds the {current_conf_pct:.0f}% confidence current-portfolio floor to each outcome before measuring failures.")
+    if show_outputs:
+        st.markdown("#### Failure Distribution (Selected Allocation)")
+        st.caption(f"Adds the {current_conf_pct:.0f}% confidence current-portfolio floor to each outcome before measuring failures.")
     failure_rows = []
 
     def _failure_stats_ann(raw_col: str, stats: dict, required_amt: float, label_source: str, floor_val: float):
@@ -713,41 +714,43 @@ if have_any:
     _run_failure_for_source("Global", annual_alloc_choice_global)
     _run_failure_for_source("SP500", annual_alloc_choice_spx)
 
-    if failure_rows:
-        fail_df = pd.DataFrame(failure_rows)
-        # Friendlier allocation label in output
-        def _friendly_alloc_fail(raw_name, source):
-            if source == "Global":
-                return PRETTY_LBM.get(raw_name, raw_name)
-            else:
-                return PRETTY_SPX.get(raw_name, raw_name)
-        fail_df["Allocation"] = fail_df.apply(lambda r: _friendly_alloc_fail(r["Allocation"], r["Source"]), axis=1)
-        st.data_editor(
-            fail_df,
-            hide_index=True,
-            disabled=True,
-            width="stretch",
-            column_config={
-                "Source": st.column_config.TextColumn("Source", help="Data source used."),
-                "Allocation": st.column_config.TextColumn("Allocation", help="Selected annual allocation at current settings."),
-                "Windows": st.column_config.NumberColumn("Windows", help="Number of valid rolling windows."),
-                "Failures": st.column_config.NumberColumn("Failures", help="Count of windows that ended below Ideal Goal."),
-                "Failure Rate": st.column_config.TextColumn("Failure Rate", help="Failures / Windows."),
-                "Worst": st.column_config.TextColumn("Worst", help="Worst ending value among failures."),
-                "P25": st.column_config.TextColumn("P25", help="25th percentile of failure endings."),
-                "Median": st.column_config.TextColumn("Median", help="Median failure ending value."),
-                "P75": st.column_config.TextColumn("P75", help="75th percentile (less-bad failure)."),
-            }
-        )
-    else:
-        st.info("No failures at the selected settings for the chosen allocation(s).")
+    if show_outputs:
+        if failure_rows:
+            fail_df = pd.DataFrame(failure_rows)
+            # Friendlier allocation label in output
+            def _friendly_alloc_fail(raw_name, source):
+                if source == "Global":
+                    return PRETTY_LBM.get(raw_name, raw_name)
+                else:
+                    return PRETTY_SPX.get(raw_name, raw_name)
+            fail_df["Allocation"] = fail_df.apply(lambda r: _friendly_alloc_fail(r["Allocation"], r["Source"]), axis=1)
+            st.data_editor(
+                fail_df,
+                hide_index=True,
+                disabled=True,
+                width="stretch",
+                column_config={
+                    "Source": st.column_config.TextColumn("Source", help="Data source used."),
+                    "Allocation": st.column_config.TextColumn("Allocation", help="Selected annual allocation at current settings."),
+                    "Windows": st.column_config.NumberColumn("Windows", help="Number of valid rolling windows."),
+                    "Failures": st.column_config.NumberColumn("Failures", help="Count of windows that ended below Ideal Goal."),
+                    "Failure Rate": st.column_config.TextColumn("Failure Rate", help="Failures / Windows."),
+                    "Worst": st.column_config.TextColumn("Worst", help="Worst ending value among failures."),
+                    "P25": st.column_config.TextColumn("P25", help="25th percentile of failure endings."),
+                    "Median": st.column_config.TextColumn("Median", help="Median failure ending value."),
+                    "P75": st.column_config.TextColumn("P75", help="75th percentile (less-bad failure)."),
+                }
+            )
+        else:
+            st.info("No failures at the selected settings for the chosen allocation(s).")
 
     # ------------------------------------------------------------
     # Success Distribution (when investing the Required Annual) for selected allocation(s)
     # ------------------------------------------------------------
-    st.markdown("#### Success Distribution (Selected Allocation)")
-    st.caption(f"Same combined balance: required annual contributions plus the {current_conf_pct:.0f}% confidence current-portfolio floor.")
     success_rows = []
+    if show_outputs:
+        st.markdown("#### Success Distribution (Selected Allocation)")
+        st.caption(f"Same combined balance: required annual contributions plus the {current_conf_pct:.0f}% confidence current-portfolio floor.")
 
     def _success_stats_ann(raw_col: str, stats: dict, required_amt: float, label_source: str, floor_val: float):
         evs_arr = stats.get("evs") if stats else None
