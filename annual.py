@@ -65,7 +65,12 @@ with col2:
     current_conf_pct = st.slider(
         "Current Portfolio Confidence (%)",
         min_value=50, max_value=100, value=99, step=1,
-        help="How conservative to be when counting today’s balance: 100% assumes the worst historical outcome, 90% means you credit yourself with what happened in 9 out of 10 periods, etc.",
+        help=(
+            "Think of this as how conservative you want to be with the money you already have. "
+            "At 100%, you only credit yourself with the very worst historical outcome. "
+            "At 90%, you say “I’m comfortable assuming my current savings will at least match what happened in 9 out of 10 similar periods,” "
+            "which gives more credit to today’s balance and shrinks the required annual contribution."
+        ),
     )
     acceptable_conf_level = 1.0  # fixed 100%
 with col3:
