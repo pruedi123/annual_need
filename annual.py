@@ -50,7 +50,7 @@ with col1:
                                  help="Today’s dollars: same buying power as money today.",
                                  format="%i")
     conf_pct_ideal = st.slider("Ideal Confidence (%)", min_value=50, step= 10, max_value=100, value=90,
-                               help="e.g., 90% means ≥90% of historical windows finish at/above the Ideal Goal.")
+                               help="e.g., 90% means ≥90% of historical simulations (audits) finish at/above the Ideal Goal.")
     ideal_conf_level = conf_pct_ideal / 100.0
 with col2:
     num_years = st.number_input("Years", min_value=1, max_value=60, value=4)
