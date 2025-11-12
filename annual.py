@@ -54,9 +54,14 @@ with col1:
     ideal_conf_level = conf_pct_ideal / 100.0
 with col2:
     num_years = st.number_input("Years", min_value=1, max_value=60, value=4)
-    acceptable_goal = st.number_input("Essential Goal ($)", min_value=1, step=50000, value=2_000_000,
-                                      help="A minimum acceptable outcome (floor) which means that you do not want less than this amount.",
-                                      format="%i")
+    acceptable_goal = st.number_input(
+        "Essential Goal ($)",
+        min_value=1,
+        step=50000,
+        value=2_000_000,
+        help="A minimum acceptable outcome (floor) which means that you do not want less than this amount. In other words, you want to be 100% confident of reaching at least this amount.",
+        format="%i",
+    )
     current_portfolio_value = st.number_input(
         "Current Portfolio Value ($)", min_value=0, step=50_000, value=2000000,
         help="How much is already invested today. It compounds through the historical windows alongside new contributions.",
