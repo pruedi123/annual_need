@@ -868,15 +868,11 @@ if have_any:
         st.subheader("Result Explanation (plain text)")
         if floor_descriptions:
             tail_pct = max(0.0, 100 - float(current_conf_pct))
-            floor_lines = [
-                f"{desc['source']}: below {desc['amount']} with a {desc['label']} allocation."
-                for desc in floor_descriptions
-            ]
-            st.text(
-                f"Based on your confidence choice of {current_conf_pct:.0f}%, there is only about a {tail_pct:.0f}% chance the current portfolio ends below these floor amounts:\n"
-                + "\n".join(floor_lines) + "\n"
-                + f"We treat that floor as money already in hand, then size the required annual payments so the Ideal Goal is met at {conf_pct_ideal:.0f}% confidence."
-            )
+            for desc in floor_descriptions:
+                st.text(
+                    f"Based on your confidence choice of {current_conf_pct:.0f}%, there is only about a {tail_pct:.0f}% chance the current portfolio ends below the floor amount {desc['amount']} with a {desc['label']} allocation in {desc['source']}."
+                )
+            st.text(f"We treat that floor as money already in hand, then size the required annual payments so the Ideal Goal is met at {conf_pct_ideal:.0f}% confidence.")
         for det in summary_details:
             src = det["source"]
             req_text = _fmt_currency(det["required"])
