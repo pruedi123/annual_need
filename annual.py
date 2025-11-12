@@ -867,45 +867,46 @@ if have_any:
             st.text(explanation)
 
     # Charts (separate), highlight selected allocation (fallback to minimum if none)
-    chart_df = wide_req.copy()
-    if not chart_df.empty:
-        n = len(chart_df)
-        # Global chart
-        if "Global" in chart_df.columns and chart_df["Global"].notna().any():
-            g_vals = chart_df["Global"]
-            g_colors = ["#9ecae1"] * n
-            target_label = selected_labels.get("Global")
-            if target_label and target_label in chart_df["Allocation"].values:
-                g_target_idx = chart_df.index[chart_df["Allocation"] == target_label][0]
-                g_colors[g_target_idx] = "#2ca02c"
-            elif g_vals.notna().any():
-                g_min_pos = g_vals[g_vals.notna()].idxmin()
-                try: g_i = chart_df.index.get_loc(g_min_pos)
-                except Exception: g_i = int(g_min_pos) if isinstance(g_min_pos,(int,np.integer)) else None
-                if g_i is not None and 0 <= g_i < n: g_colors[g_i] = "#2ca02c"
-            fig_g = go.Figure()
-            fig_g.add_bar(name="Global", x=chart_df["Allocation"], y=g_vals, marker_color=g_colors)
-            fig_g.update_layout(title="Required Annual — Global", xaxis_title="Allocation", yaxis_title="Required Annual ($)",
-                                yaxis=dict(tickformat=",.0f", tickprefix="$"), showlegend=False)
-            _render_plotly(fig_g)
-        # SP500 chart
-        if "SP500" in chart_df.columns and chart_df["SP500"].notna().any():
-            s_vals = chart_df["SP500"]
-            s_colors = ["#3182bd"] * n
-            target_label = selected_labels.get("SP500")
-            if target_label and target_label in chart_df["Allocation"].values:
-                s_target_idx = chart_df.index[chart_df["Allocation"] == target_label][0]
-                s_colors[s_target_idx] = "#D95F02"
-            elif s_vals.notna().any():
-                s_min_pos = s_vals[s_vals.notna()].idxmin()
-                try: s_i = chart_df.index.get_loc(s_min_pos)
-                except Exception: s_i = int(s_min_pos) if isinstance(s_min_pos,(int,np.integer)) else None
-                if s_i is not None and 0 <= s_i < n: s_colors[s_i] = "#D95F02"
-            fig_s = go.Figure()
-            fig_s.add_bar(name="SP500", x=chart_df["Allocation"], y=s_vals, marker_color=s_colors)
-            fig_s.update_layout(title="Required Annual — SP500", xaxis_title="Allocation", yaxis_title="Required Annual ($)",
-                                yaxis=dict(tickformat=",.0f", tickprefix="$"), showlegend=False)
-            _render_plotly(fig_s)
+    if show_outputs:
+        chart_df = wide_req.copy()
+        if not chart_df.empty:
+            n = len(chart_df)
+            # Global chart
+            if "Global" in chart_df.columns and chart_df["Global"].notna().any():
+                g_vals = chart_df["Global"]
+                g_colors = ["#9ecae1"] * n
+                target_label = selected_labels.get("Global")
+                if target_label and target_label in chart_df["Allocation"].values:
+                    g_target_idx = chart_df.index[chart_df["Allocation"] == target_label][0]
+                    g_colors[g_target_idx] = "#2ca02c"
+                elif g_vals.notna().any():
+                    g_min_pos = g_vals[g_vals.notna()].idxmin()
+                    try: g_i = chart_df.index.get_loc(g_min_pos)
+                    except Exception: g_i = int(g_min_pos) if isinstance(g_min_pos,(int,np.integer)) else None
+                    if g_i is not None and 0 <= g_i < n: g_colors[g_i] = "#2ca02c"
+                fig_g = go.Figure()
+                fig_g.add_bar(name="Global", x=chart_df["Allocation"], y=g_vals, marker_color=g_colors)
+                fig_g.update_layout(title="Required Annual — Global", xaxis_title="Allocation", yaxis_title="Required Annual ($)",
+                                    yaxis=dict(tickformat=",.0f", tickprefix="$"), showlegend=False)
+                _render_plotly(fig_g)
+            # SP500 chart
+            if "SP500" in chart_df.columns and chart_df["SP500"].notna().any():
+                s_vals = chart_df["SP500"]
+                s_colors = ["#3182bd"] * n
+                target_label = selected_labels.get("SP500")
+                if target_label and target_label in chart_df["Allocation"].values:
+                    s_target_idx = chart_df.index[chart_df["Allocation"] == target_label][0]
+                    s_colors[s_target_idx] = "#D95F02"
+                elif s_vals.notna().any():
+                    s_min_pos = s_vals[s_vals.notna()].idxmin()
+                    try: s_i = chart_df.index.get_loc(s_min_pos)
+                    except Exception: s_i = int(s_min_pos) if isinstance(s_min_pos,(int,np.integer)) else None
+                    if s_i is not None and 0 <= s_i < n: s_colors[s_i] = "#D95F02"
+                fig_s = go.Figure()
+                fig_s.add_bar(name="SP500", x=chart_df["Allocation"], y=s_vals, marker_color=s_colors)
+                fig_s.update_layout(title="Required Annual — SP500", xaxis_title="Allocation", yaxis_title="Required Annual ($)",
+                                    yaxis=dict(tickformat=",.0f", tickprefix="$"), showlegend=False)
+                _render_plotly(fig_s)
 
     # Download (CSV)
     csv = wide_req.to_csv(index=False)
