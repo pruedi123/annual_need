@@ -544,8 +544,9 @@ if have_any:
     display_results = display_results[cols]
 
     # Current portfolio floor summary
-    if show_outputs and current_portfolio_value > 0:
-        floor_rows = []
+    floor_rows = []
+    floor_descriptions = []
+    if current_portfolio_value > 0:
         floor_col_name = f"Floor ({current_conf_pct:.0f}%)"
         if src_kind in ("LBM","BOTH") and lump_label.get("Global"):
             floor_rows.append({
@@ -553,16 +554,18 @@ if have_any:
                 "Allocation": lump_label["Global"],
                 floor_col_name: f"${lump_floor.get('Global', 0.0):,.0f}",
             })
+            floor_descriptions.append(f"Global: {_fmt_currency(lump_floor.get('Global', 0.0))}")
         if src_kind in ("SPX","BOTH") and lump_label.get("SP500"):
             floor_rows.append({
                 "Source": "SP500",
                 "Allocation": lump_label["SP500"],
                 floor_col_name: f"${lump_floor.get('SP500', 0.0):,.0f}",
             })
-        if floor_rows:
-            sb.markdown(f"**Current Portfolio Floor ({current_conf_pct:.0f}% Confidence)**")
-            sb.caption("Historical outcome for today's balance, assuming it remains in the chosen allocation.")
-            sb.table(pd.DataFrame(floor_rows))
+            floor_descriptions.append(f"SP500: {_fmt_currency(lump_floor.get('SP500', 0.0))}")
+        if show_outputs and floor_rows:
+            st.subheader(f"Current Portfolio Floor ({current_conf_pct:.0f}% Confidence)")
+            st.caption("Historical outcome for today's balance, assuming it remains in the chosen allocation.")
+            st.table(pd.DataFrame(floor_rows))
 
     summary_rows = []
     summary_details = []
@@ -853,6 +856,13 @@ if have_any:
         fail_lookup = {r["Source"]: r for r in failure_rows}
         succ_lookup = {r["Source"]: r for r in success_rows}
         st.subheader("Result Explanation (plain text)")
+        if floor_descriptions:
+            tail_pct = max(0.0, 100 - float(current_conf_pct))
+            floors_list = ", ".join(floor_descriptions)
+            st.text(
+                f"Based on your confidence choice of {current_conf_pct:.0f}%, there is only about a {tail_pct:.0f}% chance the current portfolio ends below the floor amounts shown ({floors_list}). "
+                f"We treat that floor as money already in hand, then size the required annual payments so the Ideal Goal is met at {conf_pct_ideal:.0f}% confidence."
+            )
         for det in summary_details:
             src = det["source"]
             req_text = _fmt_currency(det["required"])
