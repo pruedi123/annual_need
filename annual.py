@@ -55,7 +55,7 @@ with col1:
 with col2:
     num_years = st.number_input("Years", min_value=1, max_value=60, value=4)
     acceptable_goal = st.number_input("Essential Goal ($)", min_value=1, step=50000, value=2_000_000,
-                                      help="A minimum acceptable outcome (floor) sized at 100% confidence.",
+                                      help="A minimum acceptable outcome (floor) which means that you do not want less than this amount.",
                                       format="%i")
     current_portfolio_value = st.number_input(
         "Current Portfolio Value ($)", min_value=0, step=50_000, value=2000000,
