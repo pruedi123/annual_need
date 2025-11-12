@@ -34,54 +34,57 @@ sheet_name = "global_factors"
 spx_file_path = "spx_factors.xlsx"
 spx_sheet_name = "spx_factors"
 
-col1, col2, col3 = st.columns(3)
+sb = st.sidebar
 current_alloc_choice_global = None
 current_alloc_choice_spx = None
 annual_alloc_choice_global = None
 annual_alloc_choice_spx = None
-with col1:
-    data_choice = st.selectbox(
-        "Data source",
-        ["Global Equity", "S&P 500", "Both Global & SP500"],
-        index=0,
-        help="Choose the factor set: LBM workbook (Excel) or S&P 500 workbook (spx_factors.xlsx).",
-    )
-    ideal_goal = st.number_input("Ideal Goal ($)", min_value=1, step=50000, value=2_500_000,
-                                 help="Today’s dollars: same buying power as money today.",
-                                 format="%i")
-    conf_pct_ideal = st.slider("Ideal Confidence (%)", min_value=50, step= 10, max_value=100, value=90,
-                               help="e.g., 90% means ≥90% of historical simulations (audits) finish at/above the Ideal Goal.")
-    ideal_conf_level = conf_pct_ideal / 100.0
-with col2:
-    num_years = st.number_input("Years", min_value=1, max_value=60, value=4)
-    acceptable_goal = st.number_input(
-        "Essential Goal ($)",
-        min_value=1,
-        step=50000,
-        value=2_000_000,
-        help="A minimum acceptable outcome (floor) which means that you do not want less than this amount. In other words, you want to be 100% confident of reaching at least this amount.",
-        format="%i",
-    )
-    current_portfolio_value = st.number_input(
-        "Current Portfolio Value ($)", min_value=0, step=50_000, value=2000000,
-        help="How much is already invested today. It compounds through the historical windows alongside new contributions.",
-        format="%i"
-    )
-    current_conf_pct = st.slider(
-        "Current Portfolio Confidence (%)",
-        min_value=50, max_value=100, value=99, step=1,
-        help=(
-            "Think of this as how conservative you want to be with the money you already have. "
-            "At 100%, you only credit yourself with the very worst historical outcome. "
-            "At 99%, you say “I’m comfortable assuming my current savings will at least match what happened in 99 out of 100 similar periods,” "
-            "or in other words, only 1% of historical historical periods tested would have produced less than this amount. "
-            "which gives more credit to today’s balance and shrinks the required annual contribution."
-        ),
-    )
-    acceptable_conf_level = 1.0  # fixed 100%
-with col3:
-    fee_pct = st.slider("Annual fee (%)", min_value=0.0, max_value=1.0, value=0.20, step=0.1,
-                        help="Applied once per 12-month factor: net = gross × (1 − fee). 0.20 % = 20 basis points.")
+data_choice = sb.selectbox(
+    "Data source",
+    ["Global Equity", "S&P 500", "Both Global & SP500"],
+    index=0,
+    help="Choose the factor set: LBM workbook (Excel) or S&P 500 workbook (spx_factors.xlsx).",
+)
+ideal_goal = sb.number_input(
+    "Ideal Goal ($)", min_value=1, step=50000, value=2_500_000,
+    help="Today’s dollars: same buying power as money today.",
+    format="%i"
+)
+conf_pct_ideal = sb.slider(
+    "Ideal Confidence (%)", min_value=50, step=10, max_value=100, value=90,
+    help="e.g., 90% means ≥90% of historical simulations (audits) finish at/above the Ideal Goal."
+)
+ideal_conf_level = conf_pct_ideal / 100.0
+num_years = sb.number_input("Years", min_value=1, max_value=60, value=4)
+acceptable_goal = sb.number_input(
+    "Essential Goal ($)",
+    min_value=1,
+    step=50000,
+    value=2_000_000,
+    help="A minimum acceptable outcome (floor) which means that you do not want less than this amount. In other words, you want to be 100% confident of reaching at least this amount.",
+    format="%i",
+)
+current_portfolio_value = sb.number_input(
+    "Current Portfolio Value ($)", min_value=0, step=50_000, value=2_000_000,
+    help="How much is already invested today. It compounds through the historical windows alongside new contributions.",
+    format="%i"
+)
+current_conf_pct = sb.slider(
+    "Current Portfolio Confidence (%)",
+    min_value=50, max_value=100, value=99, step=1,
+    help=(
+        "Think of this as how conservative you want to be with the money you already have. "
+        "At 100%, you only credit yourself with the very worst historical outcome. "
+        "At 99%, you say “I’m comfortable assuming my current savings will at least match what happened in 99 out of 100 similar periods,” "
+        "or in other words, only 1% of historical historical periods tested would have produced less than this amount. "
+        "which gives more credit to today’s balance and shrinks the required annual contribution."
+    ),
+)
+acceptable_conf_level = 1.0  # fixed 100%
+fee_pct = sb.slider(
+    "Annual fee (%)", min_value=0.0, max_value=1.0, value=0.20, step=0.1,
+    help="Applied once per 12-month factor: net = gross × (1 − fee). 0.20 % = 20 basis points."
+)
 
 row_increment = 12  # Data is monthly, so step 12 rows per year
 
@@ -184,51 +187,43 @@ if ((src_kind in ("LBM","BOTH") and allocation_meta_lbm) or
     st.markdown("#### Current Portfolio Allocation")
     help_text = "Select which allocation the existing portfolio follows. It stays constant over the full horizon."
     st.caption(help_text)
-    cols_alloc = st.columns(2)
     if src_kind in ("LBM","BOTH") and allocation_meta_lbm:
-        with cols_alloc[0]:
-            current_alloc_choice_global_clean = st.selectbox(
-                "Global data",
-                options=options_curr_global,
-                format_func=lambda clean: PRETTY_LBM.get(clean, clean),
-                key="current_alloc_global"
-            )
-            current_alloc_choice_global = _meta_by_clean(allocation_meta_lbm, current_alloc_choice_global_clean)
+        current_alloc_choice_global_clean = sb.selectbox(
+            "Global data",
+            options=options_curr_global,
+            format_func=lambda clean: PRETTY_LBM.get(clean, clean),
+            key="current_alloc_global"
+        )
+        current_alloc_choice_global = _meta_by_clean(allocation_meta_lbm, current_alloc_choice_global_clean)
     if src_kind in ("SPX","BOTH") and allocation_meta_spx:
-        target_col = cols_alloc[0] if src_kind == "SPX" else cols_alloc[1]
-        with target_col:
-            current_alloc_choice_spx_clean = st.selectbox(
-                "S&P 500 data",
-                options=options_curr_spx,
-                format_func=lambda clean: PRETTY_SPX.get(clean, clean),
-                key="current_alloc_spx"
-            )
-            current_alloc_choice_spx = _meta_by_clean(allocation_meta_spx, current_alloc_choice_spx_clean)
+        current_alloc_choice_spx_clean = sb.selectbox(
+            "S&P 500 data",
+            options=options_curr_spx,
+            format_func=lambda clean: PRETTY_SPX.get(clean, clean),
+            key="current_alloc_spx"
+        )
+        current_alloc_choice_spx = _meta_by_clean(allocation_meta_spx, current_alloc_choice_spx_clean)
 
 if ((src_kind in ("LBM","BOTH") and allocation_meta_lbm) or
     (src_kind in ("SPX","BOTH") and allocation_meta_spx)):
     st.markdown("#### Annual Contribution Allocation")
     st.caption("Choose the allocation applied to ongoing annual contributions for each data source.")
-    cols_alloc_ann = st.columns(2)
     if src_kind in ("LBM","BOTH") and allocation_meta_lbm:
-        with cols_alloc_ann[0]:
-            annual_alloc_choice_global_clean = st.selectbox(
-                "Global data (annual)",
-                options=options_ann_global,
-                format_func=lambda clean: PRETTY_LBM.get(clean, clean),
-                key="annual_alloc_global"
-            )
-            annual_alloc_choice_global = _meta_by_clean(allocation_meta_lbm, annual_alloc_choice_global_clean)
+        annual_alloc_choice_global_clean = sb.selectbox(
+            "Global data (annual)",
+            options=options_ann_global,
+            format_func=lambda clean: PRETTY_LBM.get(clean, clean),
+            key="annual_alloc_global"
+        )
+        annual_alloc_choice_global = _meta_by_clean(allocation_meta_lbm, annual_alloc_choice_global_clean)
     if src_kind in ("SPX","BOTH") and allocation_meta_spx:
-        target_col = cols_alloc_ann[0] if src_kind == "SPX" else cols_alloc_ann[1]
-        with target_col:
-            annual_alloc_choice_spx_clean = st.selectbox(
-                "S&P 500 data (annual)",
-                options=options_ann_spx,
-                format_func=lambda clean: PRETTY_SPX.get(clean, clean),
-                key="annual_alloc_spx"
-            )
-            annual_alloc_choice_spx = _meta_by_clean(allocation_meta_spx, annual_alloc_choice_spx_clean)
+        annual_alloc_choice_spx_clean = sb.selectbox(
+            "S&P 500 data (annual)",
+            options=options_ann_spx,
+            format_func=lambda clean: PRETTY_SPX.get(clean, clean),
+            key="annual_alloc_spx"
+        )
+        annual_alloc_choice_spx = _meta_by_clean(allocation_meta_spx, annual_alloc_choice_spx_clean)
 
 fee = float(fee_pct)/100.0
 current_portfolio_value = float(current_portfolio_value)
@@ -394,21 +389,22 @@ def _solve_source(source_label, metas):
 if "solver_rows_display" not in st.session_state:
     st.session_state["solver_rows_display"] = None
 
-solver_cols = st.columns([2, 2, 3])
-with solver_cols[0]:
-    if st.button("Apply Manual Selection", width="stretch"):
-        st.session_state["solver_rows_display"] = None
-        _rerun()
-with solver_cols[1]:
-    run_solver = st.button("Run Solver (Min Required Annual)", width="stretch")
-with solver_cols[2]:
-    show_outputs = st.radio(
-        "View detailed results?",
-        options=["Show", "Hide"],
-        index=0,
-        horizontal=True,
-        key="toggle_outputs"
-    ) == "Show"
+if "solver_rows_display" not in st.session_state:
+    st.session_state["solver_rows_display"] = None
+
+sb.divider()
+sb.markdown("### Solver / Display")
+if sb.button("Apply Manual Selection", use_container_width=True):
+    st.session_state["solver_rows_display"] = None
+    _rerun()
+run_solver = sb.button("Run Solver (Min Required Annual)", use_container_width=True)
+show_outputs = sb.radio(
+    "View detailed results?",
+    options=["Show", "Hide"],
+    index=0,
+    horizontal=True,
+    key="toggle_outputs"
+) == "Show"
 
 if run_solver:
     solver_rows = []
