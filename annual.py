@@ -184,9 +184,8 @@ def _fmt_currency(val):
 
 if ((src_kind in ("LBM","BOTH") and allocation_meta_lbm) or
     (src_kind in ("SPX","BOTH") and allocation_meta_spx)):
-    st.markdown("#### Current Portfolio Allocation")
-    help_text = "Select which allocation the existing portfolio follows. It stays constant over the full horizon."
-    st.caption(help_text)
+    sb.markdown("### Current Portfolio Allocation")
+    sb.caption("Choose the mix that represents how your existing money is invested today.")
     if src_kind in ("LBM","BOTH") and allocation_meta_lbm:
         current_alloc_choice_global_clean = sb.selectbox(
             "Global data",
@@ -206,8 +205,8 @@ if ((src_kind in ("LBM","BOTH") and allocation_meta_lbm) or
 
 if ((src_kind in ("LBM","BOTH") and allocation_meta_lbm) or
     (src_kind in ("SPX","BOTH") and allocation_meta_spx)):
-    st.markdown("#### Annual Contribution Allocation")
-    st.caption("Choose the allocation applied to ongoing annual contributions for each data source.")
+    sb.markdown("### Annual Contribution Allocation")
+    sb.caption("Pick the mix for new contributions going in each year.")
     if src_kind in ("LBM","BOTH") and allocation_meta_lbm:
         annual_alloc_choice_global_clean = sb.selectbox(
             "Global data (annual)",
@@ -561,9 +560,9 @@ if have_any:
                 floor_col_name: f"${lump_floor.get('SP500', 0.0):,.0f}",
             })
         if floor_rows:
-            st.subheader(f"Current Portfolio Floor ({current_conf_pct:.0f}% Confidence)")
-            st.caption("Historical outcome for today's balance at the selected confidence, assuming it remains in the chosen allocation.")
-            st.table(pd.DataFrame(floor_rows))
+            sb.markdown(f"**Current Portfolio Floor ({current_conf_pct:.0f}% Confidence)**")
+            sb.caption("Historical outcome for today's balance, assuming it remains in the chosen allocation.")
+            sb.table(pd.DataFrame(floor_rows))
 
     summary_rows = []
     summary_details = []
