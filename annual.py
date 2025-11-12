@@ -885,9 +885,11 @@ if have_any:
             num_fail = fail.get("Failures Raw", 0)
             worst_txt = fail.get("Worst", "N/A")
             median_txt = fail.get("Median", "N/A")
-            st.text(f"To reach your ${ideal_goal:,.0f} goal, you'll need to add {req_text} per year for {int(num_years)} years, invested in the {src} {det['annual_label']} portfolio.")
-            st.text(f"Historically, 9 out of 10 of the historical audits hit or beat the goal (success rate {success_rate}); the typical outcome (median success) was {p25_text}.")
-            st.text(f"In the rare misses (~{failure_rate}, or {num_fail} historical audits), the worst ending value was {worst_txt} and the typical shortfall (median failure) was {median_txt}.")
+            with st.container():
+                st.markdown(f"**{src} Scenario**")
+                st.text(f"To reach your ${ideal_goal:,.0f} goal, you'll need to add {req_text} per year for {int(num_years)} years, invested in the {src} {det['annual_label']} portfolio.")
+                st.text(f"Historically, 9 out of 10 of the historical audits hit or beat the goal (success rate {success_rate}); the typical outcome (median success) was {p25_text}.")
+                st.text(f"In the rare misses (~{failure_rate}, or {num_fail} historical audits), the worst ending value was {worst_txt} and the typical shortfall (median failure) was {median_txt}.")
 
     # Charts (separate), highlight selected allocation (fallback to minimum if none)
     if show_outputs:
