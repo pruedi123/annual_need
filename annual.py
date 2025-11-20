@@ -30,10 +30,10 @@ st.caption("Computes the annual contribution required to reach BOTH an Ideal Goa
 # ------------------------------
 # Inputs (you can change defaults)
 # ------------------------------
-file_path = "global_factors.xlsx"
-sheet_name = "global_factors"
-spx_file_path = "spx_factors.xlsx"
-spx_sheet_name = "spx_factors"
+file_path = "global_mo_factors.xlsx"
+sheet_name = "factors_mo"
+spx_file_path = "spx_mo_factors.xlsx"
+spx_sheet_name = "factors_mo"
 
 sb = st.sidebar
 current_alloc_choice_global = None
@@ -42,9 +42,9 @@ annual_alloc_choice_global = None
 annual_alloc_choice_spx = None
 data_choice = sb.selectbox(
     "Data source",
-    ["Global Equity", "S&P 500", "Both Global & SP500"],
+    ["Global Equity", "S&P 500"],
     index=0,
-    help="Choose the factor set: LBM workbook (Excel) or S&P 500 workbook (spx_factors.xlsx).",
+    help="Choose the factor set: LBM workbook (Excel) or S&P 500 workbook (spx_mo_factors.xlsx).",
 )
 returns_basis = sb.radio(
     "Returns basis",
@@ -64,12 +64,12 @@ current_portfolio_value = sb.number_input(
     format="%i"
 )
 annual_invest_sim = sb.number_input(
-    "Annual investment to simulate ($)",
+    "Monthly investment to simulate ($)",
     min_value=0,
-    value=240_000,
-    step=25_000,
+    value=20_000,
+    step=5_000,
     format="%i",
-    help="Used for the percentile chart (no floor is added)."
+    help="Monthly contribution applied each month in the simulations (no floor added)."
 )
 fee_pct = sb.slider(
     "Annual fee (%)", min_value=0.0, max_value=1.0, value=0.20, step=0.1,
@@ -77,13 +77,11 @@ fee_pct = sb.slider(
 )
 
 
-row_increment = 12  # Data is monthly, so step 12 rows per year
+row_increment = 1  # Data is monthly, so step monthly
 
 st.divider()
 # Load factors (LBM Excel or SPX Excel)
-if data_choice.startswith("Both"):
-    src_kind = "BOTH"
-elif data_choice.startswith("Global"):
+if data_choice.startswith("Global"):
     src_kind = "LBM"
 else:
     src_kind = "SPX"
@@ -91,17 +89,22 @@ else:
 df_lbm, df_spx = None, None
 df_spx_base = None
 earliest_begin_month = None
+dates_map = {"Global": None, "SP500": None}
 spx_needed = src_kind in ("SPX", "BOTH") or nominal_mode
 if src_kind in ("LBM", "BOTH"):
     try:
         df_lbm = pd.read_excel(file_path, sheet_name=sheet_name)
         df_lbm = df_lbm.dropna(how="all").reset_index(drop=True)
+        if "Date" in df_lbm.columns:
+            dates_map["Global"] = pd.to_datetime(df_lbm["Date"], errors="coerce")
     except Exception as e:
         st.error(f"Error loading LBM factors: {e}")
 if spx_needed:
     try:
         df_spx_base = pd.read_excel(spx_file_path, sheet_name=spx_sheet_name)
         df_spx_base = df_spx_base.dropna(how="all").reset_index(drop=True)
+        if "Date" in df_spx_base.columns:
+            dates_map["SP500"] = pd.to_datetime(df_spx_base["Date"], errors="coerce")
         try:
             earliest_begin_month = pd.to_datetime(df_spx_base["begin month"]).min()
             if pd.notna(earliest_begin_month):
@@ -138,25 +141,30 @@ def _load_cpi_monthly(path):
 
 
 def _build_nominal_inflation_series(spx_dates_df, cpi_df):
-    """Return inflation-factor series aligned with the SPX window rows or None."""
+    """Return inflation-factor series aligned with rows (monthly or 12m)."""
     if spx_dates_df is None or cpi_df is None:
         return None
-    if "begin month" not in spx_dates_df.columns or "end month" not in spx_dates_df.columns:
-        return None
-    begins = pd.to_datetime(spx_dates_df["begin month"], errors="coerce")
-    ends = pd.to_datetime(spx_dates_df["end month"], errors="coerce")
-    monthly = cpi_df[["Date", "inflation_factor"]].copy()
-    result = []
-    for start, end in zip(begins, ends):
-        if pd.isna(start) or pd.isna(end):
-            result.append(np.nan)
-            continue
-        window = monthly[(monthly["Date"] >= start) & (monthly["Date"] <= end)]
-        if window.shape[0] != 12:
-            result.append(np.nan)
-            continue
-        result.append(float(window["inflation_factor"].prod()))
-    return pd.Series(result, index=spx_dates_df.index)
+    if "Date" in spx_dates_df.columns:
+        dates = pd.to_datetime(spx_dates_df["Date"], errors="coerce")
+        cpi_map = cpi_df.set_index("Date")["inflation_factor"]
+        aligned = cpi_map.reindex(dates)
+        return aligned.reset_index(drop=True)
+    if "begin month" in spx_dates_df.columns and "end month" in spx_dates_df.columns:
+        begins = pd.to_datetime(spx_dates_df["begin month"], errors="coerce")
+        ends = pd.to_datetime(spx_dates_df["end month"], errors="coerce")
+        monthly = cpi_df[["Date", "inflation_factor"]].copy()
+        result = []
+        for start, end in zip(begins, ends):
+            if pd.isna(start) or pd.isna(end):
+                result.append(np.nan)
+                continue
+            window = monthly[(monthly["Date"] >= start) & (monthly["Date"] <= end)]
+            if window.shape[0] != 12:
+                result.append(np.nan)
+                continue
+            result.append(float(window["inflation_factor"].prod()))
+        return pd.Series(result, index=spx_dates_df.index)
+    return None
 
 
 def _apply_nominal_adjustment(df, cols, inflation_series, label):
@@ -189,16 +197,14 @@ if src_kind in ("SPX","BOTH") and not allocation_cols_spx:
 
 inflation_series = None
 if nominal_mode:
-    if df_spx_base is None:
-        st.error("Nominal returns require SPX factor windows (spx_factors.xlsx) for CPI alignment.")
+    cpi_df = _load_cpi_monthly(CPI_FILE_PATH)
+    if cpi_df is None:
+        st.error(f"Could not load CPI data from {CPI_FILE_PATH}; nominal returns stay disabled.")
     else:
-        cpi_df = _load_cpi_monthly(CPI_FILE_PATH)
-        if cpi_df is None:
-            st.error(f"Could not load CPI data from {CPI_FILE_PATH}; nominal returns stay disabled.")
-        else:
-            inflation_series = _build_nominal_inflation_series(df_spx_base, cpi_df)
-            if inflation_series is None or inflation_series.dropna().empty:
-                st.warning("Nominal returns are enabled but CPI coverage does not span the available windows.")
+        base_df = df_spx_base if df_spx_base is not None else df_lbm
+        inflation_series = _build_nominal_inflation_series(base_df, cpi_df)
+        if inflation_series is None or inflation_series.dropna().empty:
+            st.warning("Nominal returns are enabled but CPI coverage does not span the available windows.")
     applied_nominal = False
     if inflation_series is not None:
         if df_lbm is not None:
@@ -381,13 +387,13 @@ def _quantile_linear(arr: np.ndarray, q: float) -> float:
         return float(np.quantile(arr, q, interpolation="linear"))
 
 
-def simulate_annuity_and_lumpsum(factors: pd.Series, years: int, step: int) -> tuple[list, list]:
-    """Return ending values per $1 for both annuity contributions and a lump sum."""
-    annuity_vals, lump_vals = [], []
+def simulate_annuity_and_lumpsum(factors: pd.Series, years: int, step: int) -> tuple[list, list, list]:
+    """Return ending values per $1 for both annuity contributions and a lump sum, plus start indices."""
+    annuity_vals, lump_vals, starts = [], [], []
     n = len(factors)
     max_start = n - (step * (years - 1))
     if max_start <= 0:
-        return annuity_vals, lump_vals
+        return annuity_vals, lump_vals, starts
     for start in range(max_start):
         inv = 0.0
         lump = 1.0
@@ -403,7 +409,8 @@ def simulate_annuity_and_lumpsum(factors: pd.Series, years: int, step: int) -> t
         if valid:
             annuity_vals.append(inv)
             lump_vals.append(lump)
-    return annuity_vals, lump_vals
+            starts.append(start)
+    return annuity_vals, lump_vals, starts
 
 
 def simulate_ending_values_annuity(factors: pd.Series, years: int, step: int) -> list:
@@ -449,8 +456,12 @@ def _build_caches(df_src, metas, source_label):
     for meta in metas:
         col_raw = meta["raw"]
         col_clean = meta["clean"]
-        evs, lumps = simulate_annuity_and_lumpsum(df_src[col_raw], int(num_years), int(row_increment))
-        calc_cache[source_label][col_clean] = {"evs": np.array(evs, dtype=float)}
+        periods = int(num_years) * 12
+        evs, lumps, starts = simulate_annuity_and_lumpsum(df_src[col_raw], periods, int(row_increment))
+        calc_cache[source_label][col_clean] = {
+            "evs": np.array(evs, dtype=float),
+            "starts": np.array(starts, dtype=int),
+        }
         lump_cache[source_label][col_clean] = np.array(lumps, dtype=float)
 
 _build_caches(df_lbm, allocation_meta_lbm, "Global")
@@ -477,21 +488,24 @@ def _scenario_outcomes(source_label, current_clean, annual_clean):
     annual_meta = _meta_by_clean(metas, annual_clean)
     if not current_meta or not annual_meta:
         return None, None
-    evs_arr = calc_cache[source_label].get(annual_meta["clean"], {}).get("evs")
+    cache_entry = calc_cache[source_label].get(annual_meta["clean"], {})
+    evs_arr = cache_entry.get("evs")
+    starts_arr = cache_entry.get("starts")
     lumps_arr = lump_cache[source_label].get(current_meta["clean"])
     if evs_arr is None or lumps_arr is None:
         return None, None
-    n = min(len(evs_arr), len(lumps_arr))
+    n = min(len(evs_arr), len(lumps_arr), len(starts_arr) if starts_arr is not None else len(evs_arr))
     if n <= 0:
         return None, None
     evs_slice = np.array(evs_arr[:n], dtype=float)
+    starts_slice = np.array(starts_arr[:n], dtype=int) if starts_arr is not None else np.arange(n, dtype=int)
     lumps_slice = np.array(lumps_arr[:n], dtype=float)
     mask = np.isfinite(evs_slice) & np.isfinite(lumps_slice)
     if not mask.any():
         return None, None
     evs_slice = evs_slice[mask]
     lumps_slice = lumps_slice[mask]
-    idxs = np.arange(n)[mask]
+    idxs = starts_slice[mask]
     outcomes = lumps_slice * float(current_portfolio_value) + evs_slice * annual_amount
     finite_mask = np.isfinite(outcomes)
     if not finite_mask.any():
@@ -681,11 +695,14 @@ for sc_idx, sc in enumerate(scenarios):
         hovertemplate="%{x}<br>%{y:,.0f}<extra></extra>",
     ))
     p0_begin = None
-    if sc["source"] == "SP500" and idxs is not None and idxs.size > 0 and df_spx_base is not None:
+    if idxs is not None and idxs.size > 0:
         try:
             min_idx = int(idxs[np.argmin(outcomes)])
-            if 0 <= min_idx < len(df_spx_base):
-                p0_begin = min_idx + 1  # row number (1-based) from the SPX factor table
+            dates_series = dates_map.get("Global" if sc["source"] == "Global" else "SP500")
+            if dates_series is not None and 0 <= min_idx < len(dates_series):
+                date_val = dates_series.iloc[min_idx]
+                if pd.notna(date_val):
+                    p0_begin = pd.to_datetime(date_val).strftime("%Y-%m")
         except Exception:
             p0_begin = None
     table_rows.append({
@@ -716,7 +733,7 @@ if slope_traces and annual_amount > 0:
     if low_traces:
         fig_low = go.Figure(low_traces)
         fig_low.update_layout(
-            xaxis_title="Zooming intoLower percentiles",
+            xaxis_title="Zooming into Lower percentiles",
             yaxis_title="Ending value ($)",
             yaxis_tickformat=",.0f",
             template="plotly_white",
