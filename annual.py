@@ -30,10 +30,10 @@ st.caption("Computes the annual contribution required to reach BOTH an Ideal Goa
 # ------------------------------
 # Inputs (you can change defaults)
 # ------------------------------
-file_path = "global_factors.xlsx"
-sheet_name = "global_factors"
-spx_file_path = "spx_factors.xlsx"
-spx_sheet_name = "spx_factors"
+file_path = "global_mo_factors.xlsx"
+sheet_name = "factors_mo"
+spx_file_path = "spx_mo_factors.xlsx"
+spx_sheet_name = "factors_mo"
 
 sb = st.sidebar
 current_alloc_choice_global = None
@@ -42,14 +42,14 @@ annual_alloc_choice_global = None
 annual_alloc_choice_spx = None
 data_choice = sb.selectbox(
     "Data source",
-    ["Global Equity", "S&P 500", "Both Global & SP500"],
+    ["Global Equity", "S&P 500"],
     index=0,
     help="Choose the factor set: LBM workbook (Excel) or S&P 500 workbook (spx_factors.xlsx).",
 )
 returns_basis = sb.radio(
     "Returns basis",
     ["Real", "Nominal"],
-    index=0,
+    index=1,
     help=(
         "Real returns are already inflation-adjusted. "
         "Nominal returns multiply each historical window by CPI inflation factors "
@@ -57,61 +57,38 @@ returns_basis = sb.radio(
     ),
 )
 nominal_mode = (returns_basis == "Nominal")
-ideal_goal = sb.number_input(
-    "Ideal Goal ($)", min_value=1, step=50000, value=3_500_000,
-    help="Today’s dollars: same buying power as money today.",
-    format="%i"
-)
-conf_pct_ideal = sb.slider(
-    "Ideal Confidence (%)", min_value=50, step=5, max_value=100, value=90,
-    help="e.g., 90% means ≥90% of historical simulations (audits) finish at/above the Ideal Goal."
-)
-ideal_conf_level = conf_pct_ideal / 100.0
 num_years = sb.number_input("Years", min_value=1, max_value=60, value=6)
-acceptable_goal = sb.number_input(
-    "Essential Goal ($)",
-    min_value=1,
-    step=50000,
-    value=3_000_000,
-    help="A minimum acceptable outcome (floor) which means that you do not want less than this amount. In other words, you want to be 100% confident of reaching at least this amount.",
-    format="%i",
-)
 current_portfolio_value = sb.number_input(
     "Current Portfolio Value ($)", min_value=0, step=50_000, value=1_100_000,
     help="How much is already invested today. It compounds through the historical windows alongside new contributions.",
     format="%i"
 )
-current_conf_pct = sb.slider(
-    "Current Portfolio Confidence (%)",
-    min_value=50, max_value=100, value=99, step=1,
-    help=(
-        "Think of this as how conservative you want to be with the money you already have. "
-        "At 100%, you only credit yourself with the very worst historical outcome. "
-        "At 99%, you say “I’m comfortable assuming my current savings will at least match what happened in 99 out of 100 similar periods,” "
-        "or in other words, only 1% of historical historical periods tested would have produced less than this amount. "
-        "which gives more credit to today’s balance and shrinks the required annual contribution."
-    ),
+annual_invest_sim = sb.number_input(
+    "Monthly investment to simulate ($)",
+    min_value=0,
+    value=20_000,
+    step=5_000,
+    format="%i",
+    help="Monthly contribution applied each month in the simulations (no floor added)."
 )
-acceptable_conf_level = 1.0  # fixed 100%
 fee_pct = sb.slider(
     "Annual fee (%)", min_value=0.0, max_value=1.0, value=0.20, step=0.1,
     help="Applied once per 12-month factor: net = gross × (1 − fee). 0.20 % = 20 basis points."
 )
 
 
-row_increment = 12  # Data is monthly, so step 12 rows per year
+row_increment = 1  # Monthly data; step 1 row per month
 
 st.divider()
 # Load factors (LBM Excel or SPX Excel)
-if data_choice.startswith("Both"):
-    src_kind = "BOTH"
-elif data_choice.startswith("Global"):
+if data_choice.startswith("Global"):
     src_kind = "LBM"
 else:
     src_kind = "SPX"
 
 df_lbm, df_spx = None, None
 df_spx_base = None
+earliest_begin_month = None
 spx_needed = src_kind in ("SPX", "BOTH") or nominal_mode
 if src_kind in ("LBM", "BOTH"):
     try:
@@ -123,6 +100,14 @@ if spx_needed:
     try:
         df_spx_base = pd.read_excel(spx_file_path, sheet_name=spx_sheet_name)
         df_spx_base = df_spx_base.dropna(how="all").reset_index(drop=True)
+        try:
+            earliest_begin_month = pd.to_datetime(df_spx_base["begin month"]).min()
+            if pd.notna(earliest_begin_month):
+                earliest_begin_month = earliest_begin_month.strftime("%Y-%m")
+            else:
+                earliest_begin_month = None
+        except Exception:
+            earliest_begin_month = None
         if src_kind in ("SPX", "BOTH"):
             df_spx = df_spx_base.copy()
     except Exception as e:
@@ -151,25 +136,34 @@ def _load_cpi_monthly(path):
 
 
 def _build_nominal_inflation_series(spx_dates_df, cpi_df):
-    """Return inflation-factor series aligned with the SPX window rows or None."""
+    """
+    Return inflation factors aligned with rows. Supports:
+    - Monthly data: uses the per-row Date to pick CPI for that month.
+    - Legacy 12-month windows (begin/end month): multiplies 12 months of CPI.
+    """
     if spx_dates_df is None or cpi_df is None:
         return None
-    if "begin month" not in spx_dates_df.columns or "end month" not in spx_dates_df.columns:
-        return None
-    begins = pd.to_datetime(spx_dates_df["begin month"], errors="coerce")
-    ends = pd.to_datetime(spx_dates_df["end month"], errors="coerce")
-    monthly = cpi_df[["Date", "inflation_factor"]].copy()
-    result = []
-    for start, end in zip(begins, ends):
-        if pd.isna(start) or pd.isna(end):
-            result.append(np.nan)
-            continue
-        window = monthly[(monthly["Date"] >= start) & (monthly["Date"] <= end)]
-        if window.shape[0] != 12:
-            result.append(np.nan)
-            continue
-        result.append(float(window["inflation_factor"].prod()))
-    return pd.Series(result, index=spx_dates_df.index)
+    if "Date" in spx_dates_df.columns:
+        dates = pd.to_datetime(spx_dates_df["Date"], errors="coerce")
+        cpi_map = cpi_df.set_index("Date")["inflation_factor"]
+        aligned = cpi_map.reindex(dates)
+        return aligned.reset_index(drop=True)
+    if "begin month" in spx_dates_df.columns and "end month" in spx_dates_df.columns:
+        begins = pd.to_datetime(spx_dates_df["begin month"], errors="coerce")
+        ends = pd.to_datetime(spx_dates_df["end month"], errors="coerce")
+        monthly = cpi_df[["Date", "inflation_factor"]].copy()
+        result = []
+        for start, end in zip(begins, ends):
+            if pd.isna(start) or pd.isna(end):
+                result.append(np.nan)
+                continue
+            window = monthly[(monthly["Date"] >= start) & (monthly["Date"] <= end)]
+            if window.shape[0] != 12:
+                result.append(np.nan)
+                continue
+            result.append(float(window["inflation_factor"].prod()))
+        return pd.Series(result, index=spx_dates_df.index)
+    return None
 
 
 def _apply_nominal_adjustment(df, cols, inflation_series, label):
@@ -202,16 +196,15 @@ if src_kind in ("SPX","BOTH") and not allocation_cols_spx:
 
 inflation_series = None
 if nominal_mode:
-    if df_spx_base is None:
-        st.error("Nominal returns require SPX factor windows (spx_factors.xlsx) for CPI alignment.")
+    cpi_df = _load_cpi_monthly(CPI_FILE_PATH)
+    if cpi_df is None:
+        st.error(f"Could not load CPI data from {CPI_FILE_PATH}; nominal returns stay disabled.")
     else:
-        cpi_df = _load_cpi_monthly(CPI_FILE_PATH)
-        if cpi_df is None:
-            st.error(f"Could not load CPI data from {CPI_FILE_PATH}; nominal returns stay disabled.")
-        else:
-            inflation_series = _build_nominal_inflation_series(df_spx_base, cpi_df)
-            if inflation_series is None or inflation_series.dropna().empty:
-                st.warning("Nominal returns are enabled but CPI coverage does not span the available windows.")
+        # Align CPI to whichever dataset is present (monthly Date support)
+        base_df = df_spx_base if df_spx_base is not None else df_lbm
+        inflation_series = _build_nominal_inflation_series(base_df, cpi_df)
+        if inflation_series is None or inflation_series.dropna().empty:
+            st.warning("Nominal returns are enabled but CPI coverage does not span the available windows.")
     applied_nominal = False
     if inflation_series is not None:
         if df_lbm is not None:
@@ -374,8 +367,6 @@ if ((src_kind in ("LBM","BOTH") and allocation_meta_lbm) or
 
 fee = float(fee_pct)/100.0
 current_portfolio_value = float(current_portfolio_value)
-current_conf_tail = max(0.0, min(1.0, 1.0 - float(current_conf_pct) / 100.0))
-ideal_tail = max(0.0, min(1.0, 1.0 - float(ideal_conf_level)))
 if fee > 0:
     if df_lbm is not None and allocation_cols_lbm:
         df_lbm[allocation_cols_lbm] = df_lbm[allocation_cols_lbm] * (1.0 - fee)
@@ -461,10 +452,11 @@ lump_cache = {"Global": {}, "SP500": {}}
 def _build_caches(df_src, metas, source_label):
     if df_src is None or not metas:
         return
+    periods = int(num_years) * 12
     for meta in metas:
         col_raw = meta["raw"]
         col_clean = meta["clean"]
-        evs, lumps = simulate_annuity_and_lumpsum(df_src[col_raw], int(num_years), int(row_increment))
+        evs, lumps = simulate_annuity_and_lumpsum(df_src[col_raw], periods, int(row_increment))
         calc_cache[source_label][col_clean] = {"evs": np.array(evs, dtype=float)}
         lump_cache[source_label][col_clean] = np.array(lumps, dtype=float)
 
@@ -472,702 +464,281 @@ _build_caches(df_lbm, allocation_meta_lbm, "Global")
 _build_caches(df_spx, allocation_meta_spx, "SP500")
 
 # ------------------------------
-# Current portfolio floor calc
+# Scenario percentile chart (primary output)
 # ------------------------------
+st.header("Outcome Percentiles")
+st.caption("Ending value percentiles across historical windows. No floor added; uses the annual amount below.")
 
-lump_floor = {"Global": 0.0, "SP500": 0.0}
-lump_label = {"Global": None, "SP500": None}
-if current_alloc_choice_global:
-    lump_label["Global"] = PRETTY_LBM.get(current_alloc_choice_global["clean"], current_alloc_choice_global["clean"])
-if current_alloc_choice_spx:
-    lump_label["SP500"] = PRETTY_SPX.get(current_alloc_choice_spx["clean"], current_alloc_choice_spx["clean"])
+annual_amount = float(annual_invest_sim or 0.0)
+if annual_amount <= 0:
+    st.warning("Enter a positive annual investment to plot outcomes.")
 
-def _floor_for_choice(source_label, choice_meta):
-    if current_portfolio_value <= 0 or not choice_meta:
-        return 0.0
-    lumps_arr = lump_cache[source_label].get(choice_meta["clean"])
-    if lumps_arr is None or lumps_arr.size == 0:
-        return 0.0
-    floor_factor = _quantile_linear(lumps_arr, current_conf_tail)
-    return float(floor_factor * current_portfolio_value)
+def _options_for_source(source_label):
+    return allocation_meta_lbm if source_label == "Global" else allocation_meta_spx
 
-if current_alloc_choice_global:
-    lump_floor["Global"] = _floor_for_choice("Global", current_alloc_choice_global)
-if current_alloc_choice_spx:
-    lump_floor["SP500"] = _floor_for_choice("SP500", current_alloc_choice_spx)
-
-def _solve_source(source_label, metas):
+def _scenario_outcomes(source_label, current_clean, annual_clean):
+    metas = _options_for_source(source_label)
     if not metas:
-        return None
-    best = None
-    for current_meta in metas:
-        floor_val = _floor_for_choice(source_label, current_meta)
-        shortfall_ideal = max(float(ideal_goal) - floor_val, 0.0)
-        shortfall_accept = max(float(acceptable_goal) - floor_val, 0.0)
-        for annual_meta in metas:
-            evs_arr = calc_cache[source_label].get(annual_meta["clean"], {}).get("evs")
-            if evs_arr is None or evs_arr.size == 0:
-                continue
-            req_i = required_annual_for_goal(evs_arr, shortfall_ideal, float(ideal_conf_level))
-            req_a = required_annual_for_goal(evs_arr, shortfall_accept, 1.0)
-            req = max(req_i, req_a)
-            if not np.isfinite(req):
-                continue
-            total_arr = evs_arr * float(req)
-            ending_val = float('nan')
-            if total_arr.size:
-                ending_val = _quantile_linear(np.array(total_arr, dtype=float), ideal_tail) + floor_val
-            display_current = PRETTY_LBM.get(current_meta["clean"], current_meta["clean"]) if source_label == "Global" else PRETTY_SPX.get(current_meta["clean"], current_meta["clean"])
-            display_annual = PRETTY_LBM.get(annual_meta["clean"], annual_meta["clean"]) if source_label == "Global" else PRETTY_SPX.get(annual_meta["clean"], annual_meta["clean"])
-            entry = {
-                "Source": source_label,
-                "Current Allocation": display_current,
-                "Annual Allocation": display_annual,
-                "Floor": floor_val,
-                "Required Annual": float(req),
-                "Ending Value": ending_val,
-                "current_clean": current_meta["clean"],
-                "annual_clean": annual_meta["clean"],
-            }
-            if best is None or entry["Required Annual"] < best["Required Annual"]:
-                best = entry
-    return best
+        return None, None
+    current_meta = _meta_by_clean(metas, current_clean)
+    annual_meta = _meta_by_clean(metas, annual_clean)
+    if not current_meta or not annual_meta:
+        return None, None
+    evs_arr = calc_cache[source_label].get(annual_meta["clean"], {}).get("evs")
+    lumps_arr = lump_cache[source_label].get(current_meta["clean"])
+    if evs_arr is None or lumps_arr is None:
+        return None, None
+    n = min(len(evs_arr), len(lumps_arr))
+    if n <= 0:
+        return None, None
+    evs_slice = np.array(evs_arr[:n], dtype=float)
+    lumps_slice = np.array(lumps_arr[:n], dtype=float)
+    mask = np.isfinite(evs_slice) & np.isfinite(lumps_slice)
+    if not mask.any():
+        return None, None
+    evs_slice = evs_slice[mask]
+    lumps_slice = lumps_slice[mask]
+    idxs = np.arange(n)[mask]
+    outcomes = lumps_slice * float(current_portfolio_value) + evs_slice * annual_amount
+    finite_mask = np.isfinite(outcomes)
+    if not finite_mask.any():
+        return None, None
+    outcomes = outcomes[finite_mask]
+    idxs = idxs[finite_mask]
+    return outcomes, idxs
 
-if "solver_rows_display" not in st.session_state:
-    st.session_state["solver_rows_display"] = None
+scenarios = []
+source_options = []
+if allocation_meta_lbm:
+    source_options.append("Global")
+if allocation_meta_spx:
+    source_options.append("SP500")
+if not source_options:
+    st.error("No allocation data available to run scenarios.")
+    st.stop()
 
-if "solver_rows_display" not in st.session_state:
-    st.session_state["solver_rows_display"] = None
-
-sb.divider()
-sb.markdown("### Solver / Display")
-if sb.button("Apply Manual Selection", use_container_width=True):
-    st.session_state["solver_rows_display"] = None
-    _rerun()
-run_solver = sb.button("Let the app pick allocations for me", use_container_width=True)
-output_mode = sb.radio(
-    "Output view",
-    options=[
-        "Required annual tables",
-        "Percentile chart",
-        "Failure distribution",
-        "Success distribution",
-        "Solver recommendation",
-        "All",
-    ],
-    index=1,
-    help="Choose which output to render in the main area.",
+selected_source = sb.selectbox(
+    "Source for all scenarios",
+    options=source_options,
+    index=0,
 )
-annual_invest_sim = sb.number_input(
-    "Annual investment to simulate ($)",
-    min_value=0,
-    value=250_000,
-    step=25_000,
-    format="%i",
-    help="Used for the percentile chart button below (ignores the solver and the current-portfolio floor)."
+metas_for_source = _options_for_source(selected_source)
+clean_options = _clean_list(metas_for_source)
+default_percents = {1: 100, 2: 80, 3: 60}
+
+def _default_clean_for(source_label: str, pct: int) -> str:
+    if source_label == "Global":
+        return f"LBM {pct}E"
+    return f"spx{pct}e"
+
+chart_view = sb.radio(
+    "Chart view",
+    ["Percentile slope"],
+    index=0,
 )
 
-if run_solver:
-    solver_rows = []
-    updated = False
-    if src_kind in ("LBM","BOTH"):
-        best_global = _solve_source("Global", allocation_meta_lbm)
-        if best_global:
-            solver_rows.append(best_global)
-            if best_global.get("current_clean"):
-                st.session_state["pending_current_alloc_global"] = best_global["current_clean"]
-            if best_global.get("annual_clean"):
-                st.session_state["pending_annual_alloc_global"] = best_global["annual_clean"]
-            updated = True
-    if src_kind in ("SPX","BOTH"):
-        best_spx = _solve_source("SP500", allocation_meta_spx)
-        if best_spx:
-            solver_rows.append(best_spx)
-            if best_spx.get("current_clean"):
-                st.session_state["pending_current_alloc_spx"] = best_spx["current_clean"]
-            if best_spx.get("annual_clean"):
-                st.session_state["pending_annual_alloc_spx"] = best_spx["annual_clean"]
-            updated = True
-    if solver_rows:
-        st.session_state["solver_rows_display"] = solver_rows
-    if updated:
-        _rerun()
-    else:
-        st.warning("Solver could not identify a feasible allocation based on the current inputs.")
-
-# ------------------------------
-# Run (auto)
-# ------------------------------
-have_any = (
-    (src_kind in ("LBM","BOTH") and df_lbm is not None and allocation_cols_lbm) or
-    (src_kind in ("SPX","BOTH") and df_spx is not None and allocation_cols_spx)
-)
-if have_any:
-    rows = []
-    selected_rows = {"Global": None, "SP500": None}
-    selected_labels = {"Global": None, "SP500": None}
-    # LBM
-    if src_kind in ("LBM","BOTH") and allocation_meta_lbm:
-        lump_floor_global = float(lump_floor.get("Global", 0.0))
-        shortfall_ideal_global = max(float(ideal_goal) - lump_floor_global, 0.0)
-        shortfall_accept_global = max(float(acceptable_goal) - lump_floor_global, 0.0)
-        for meta in allocation_meta_lbm:
-            col_clean = meta["clean"]
-            evs_arr = calc_cache["Global"].get(col_clean, {}).get("evs")
-            if evs_arr is None:
-                continue
-            calc_cache["Global"][col_clean] = {"evs": evs_arr}
-            if evs_arr.size == 0:
-                req = np.nan
-                ending_val = np.nan
-            else:
-                req_i = required_annual_for_goal(evs_arr, shortfall_ideal_global, float(ideal_conf_level))
-                req_a = required_annual_for_goal(evs_arr, shortfall_accept_global, float(1.0))
-                req = max(req_i, req_a)
-                ending_val = np.nan
-                if np.isfinite(req):
-                    total_arr = evs_arr * float(req)
-                    if total_arr.size:
-                        ending_val = _quantile_linear(np.array(total_arr, dtype=float), ideal_tail) + lump_floor_global
-            rows.append({
-                "Allocation": col_clean,
-                "Required Annual": np.nan if pd.isna(req) else float(req),
-                "Ending Value": np.nan if pd.isna(ending_val) else float(ending_val),
-                "Current Portfolio Floor": lump_floor_global,
-            })
-            if annual_alloc_choice_global and col_clean == annual_alloc_choice_global["clean"]:
-                selected_rows["Global"] = rows[-1].copy()
-                selected_labels["Global"] = PRETTY_LBM.get(col_clean, col_clean)
-    # SPX
-    if src_kind in ("SPX","BOTH") and allocation_meta_spx:
-        lump_floor_spx = float(lump_floor.get("SP500", 0.0))
-        shortfall_ideal_spx = max(float(ideal_goal) - lump_floor_spx, 0.0)
-        shortfall_accept_spx = max(float(acceptable_goal) - lump_floor_spx, 0.0)
-        for meta in allocation_meta_spx:
-            col_clean = meta["clean"]
-            evs_arr = calc_cache["SP500"].get(col_clean, {}).get("evs")
-            if evs_arr is None:
-                continue
-            calc_cache["SP500"][col_clean] = {"evs": evs_arr}
-            if evs_arr.size == 0:
-                req = np.nan
-                ending_val = np.nan
-            else:
-                req_i = required_annual_for_goal(evs_arr, shortfall_ideal_spx, float(ideal_conf_level))
-                req_a = required_annual_for_goal(evs_arr, shortfall_accept_spx, float(1.0))
-                req = max(req_i, req_a)
-                ending_val = np.nan
-                if np.isfinite(req):
-                    total_arr = evs_arr * float(req)
-                    if total_arr.size:
-                        ending_val = _quantile_linear(np.array(total_arr, dtype=float), ideal_tail) + lump_floor_spx
-            rows.append({
-                "Allocation": col_clean,
-                "Required Annual": np.nan if pd.isna(req) else float(req),
-                "Ending Value": np.nan if pd.isna(ending_val) else float(ending_val),
-                "Current Portfolio Floor": lump_floor_spx,
-            })
-            if annual_alloc_choice_spx and col_clean == annual_alloc_choice_spx["clean"]:
-                selected_rows["SP500"] = rows[-1].copy()
-                selected_labels["SP500"] = PRETTY_SPX.get(col_clean, col_clean)
-
-    # Build pretty maps and wide table
-
-    results = pd.DataFrame(rows)
-    # Determine source for each row and generic label
-    def _generic_label(a: str) -> str:
-        label = PRETTY_LBM.get(a, PRETTY_SPX.get(a, a))
-        # Normalize 0% Equity (spx0e) to the shared row label used in the table
-        if isinstance(label, str) and label.strip().startswith("0% Equity"):
-            return "100% Fixed"
-        return label
-    tmp = results.copy()
-    tmp["Source"] = np.where(tmp["Allocation"].str.upper().str.startswith("LBM "), "Global",
-                             np.where(tmp["Allocation"].str.lower().str.startswith("spx"), "SP500", None))
-    tmp["Generic"] = tmp["Allocation"].map(_generic_label)
-
-    def _build_wide(value_col: str) -> pd.DataFrame:
-        w = tmp.pivot_table(index="Generic", columns="Source", values=value_col, aggfunc="first")
-        w = w.reindex([g for g in GENERIC_ORDER if g in w.index])
-        w = w.rename_axis(None, axis=1).reset_index().rename(columns={"Generic":"Allocation"})
-        return w
-
-    wide_req = _build_wide("Required Annual")
-
-    # Format for display
-    display_results = wide_req.copy()
-    for col in ["Global","SP500"]:
-        if col in display_results.columns:
-            display_results[col] = display_results[col].apply(lambda x: f"${x:,.0f}" if pd.notna(x) else "")
-    # Dynamic columns
-    cols = ["Allocation"]
-    if "Global" in display_results.columns: cols.append("Global")
-    if "SP500" in display_results.columns: cols.append("SP500")
-    display_results = display_results[cols]
-
-    # Current portfolio floor summary
-    floor_rows = []
-    floor_descriptions = []
-    if current_portfolio_value > 0:
-        floor_col_name = f"Floor ({current_conf_pct:.0f}%)"
-        if src_kind in ("LBM","BOTH") and lump_label.get("Global"):
-            label = lump_label.get("Global") or "selected allocation"
-            floor_rows.append({
-                "Source": "Global",
-                "Allocation": label,
-                floor_col_name: f"${lump_floor.get('Global', 0.0):,.0f}",
-            })
-            floor_descriptions.append({
-                "source": "Global",
-                "amount": _fmt_currency(lump_floor.get("Global", 0.0)),
-                "label": label
-            })
-        if src_kind in ("SPX","BOTH") and lump_label.get("SP500"):
-            label = lump_label.get("SP500") or "selected allocation"
-            floor_rows.append({
-                "Source": "SP500",
-                "Allocation": label,
-                floor_col_name: f"${lump_floor.get('SP500', 0.0):,.0f}",
-            })
-            floor_descriptions.append({
-                "source": "SP500",
-                "amount": _fmt_currency(lump_floor.get("SP500", 0.0)),
-                "label": label
-            })
-        if output_mode in ("Required annual tables","All") and floor_rows:
-            st.subheader(f"Current Portfolio Floor ({current_conf_pct:.0f}% Confidence)")
-            st.caption("Historical outcome for today's balance, assuming it remains in the chosen allocation.")
-            st.table(pd.DataFrame(floor_rows))
-
-    summary_rows = []
-    summary_details = []
-    for source in ["Global","SP500"]:
-        sel = selected_rows.get(source)
-        if not sel:
-            continue
-        req = sel.get("Required Annual")
-        end_val = sel.get("Ending Value")
-        floor_val = lump_floor.get(source, 0.0)
-        current_label = lump_label.get(source) or "—"
-        annual_label = selected_labels.get(source) or (sel.get("Allocation") if sel else "—")
-        summary_rows.append({
-            "Source": source,
-            "Annual Allocation": annual_label,
-            "Required Annual": "" if req is None or not np.isfinite(req) else f"${req:,.0f}",
-            "Current Allocation": current_label,
-            f"Current Floor ({current_conf_pct:.0f}%)": f"${floor_val:,.0f}",
-            f"Ending Value @ {conf_pct_ideal:.0f}%": "" if end_val is None or not np.isfinite(end_val) else f"${end_val:,.0f}",
-        })
-        summary_details.append({
-            "source": source,
-            "current_label": current_label,
-            "annual_label": annual_label,
-            "floor": floor_val,
-            "required": req if req is not None and np.isfinite(req) else None,
-            "ending": end_val if end_val is not None and np.isfinite(end_val) else None,
-        })
-    if output_mode in ("Required annual tables","All"):
-        if summary_rows:
-            st.subheader("Selected Allocation Results")
-            st.caption("Compares the chosen annual contribution allocation with the current-portfolio floor.")
-            st.table(pd.DataFrame(summary_rows))
-        else:
-            st.info("Select at least one annual contribution allocation above to view results.")
-
-    solver_rows_display = st.session_state.get("solver_rows_display")
-    if output_mode in ("Solver recommendation","All") and solver_rows_display:
-        solver_df = pd.DataFrame(solver_rows_display)
-        for col in ["Floor","Required Annual","Ending Value"]:
-            if col in solver_df.columns:
-                solver_df[col] = solver_df[col].apply(lambda x: f"${x:,.0f}" if pd.notna(x) else "")
-        st.subheader("Solver Recommendation")
-        st.caption("These allocations were applied to the selectors above to minimize the required annual contribution.")
-        st.table(solver_df.drop(columns=["current_clean","annual_clean"], errors="ignore"))
-        if st.button("Clear solver recommendation", key="clear_solver"):
-            st.session_state["solver_rows_display"] = None
-            _rerun()
-
-    # ------------------------------------------------------------
-    # Optimization helper (optional)
-    # ------------------------------------------------------------
-    st.markdown("#### Optimization (Min Required Annual)")
-
-    def _solve_source(source_label, metas):
-        if not metas:
-            return None
-        best = None
-        for current_meta in metas:
-            floor_val = _floor_for_choice(source_label, current_meta)
-            shortfall_ideal = max(float(ideal_goal) - floor_val, 0.0)
-            shortfall_accept = max(float(acceptable_goal) - floor_val, 0.0)
-            for annual_meta in metas:
-                evs_arr = calc_cache[source_label].get(annual_meta["clean"], {}).get("evs")
-                if evs_arr is None or evs_arr.size == 0:
-                    continue
-                req_i = required_annual_for_goal(evs_arr, shortfall_ideal, float(ideal_conf_level))
-                req_a = required_annual_for_goal(evs_arr, shortfall_accept, 1.0)
-                req = max(req_i, req_a)
-                if not np.isfinite(req):
-                    continue
-                total_arr = evs_arr * float(req)
-                ending_val = float('nan')
-                if total_arr.size:
-                    ending_val = _quantile_linear(np.array(total_arr, dtype=float), ideal_tail) + floor_val
-                entry = {
-                    "Source": source_label,
-                    "Current Allocation": PRETTY_LBM.get(current_meta["clean"], current_meta["clean"]) if source_label == "Global" else PRETTY_SPX.get(current_meta["clean"], current_meta["clean"]),
-                    "Annual Allocation": PRETTY_LBM.get(annual_meta["clean"], annual_meta["clean"]) if source_label == "Global" else PRETTY_SPX.get(annual_meta["clean"], annual_meta["clean"]),
-                    "Floor": floor_val,
-                    "Required Annual": float(req),
-                    "Ending Value": ending_val,
-                }
-                if best is None or entry["Required Annual"] < best["Required Annual"]:
-                    best = entry
-        return best
-
-
-    # ------------------------------------------------------------
-    # Percentile chart for a fixed annual investment (no floor)
-    # ------------------------------------------------------------
-    if output_mode in ("Percentile chart","All"):
-        st.markdown("#### Percentile Distribution (Fixed Annual Investment)")
-        st.caption("Uses your annual investment input; ignores the solver and any current-portfolio floor.")
-        if st.button("Plot percentile chart", use_container_width=True, key="plot_percentiles"):
-            amt = float(annual_invest_sim or 0)
-            if amt <= 0:
-                st.warning("Enter a positive annual investment to plot percentiles.")
-            else:
-                traces = []
-                found = [False]
-                percentiles = np.linspace(0, 1, 101)
-                def _add_trace(source_label, choice_meta):
-                    if not choice_meta:
-                        return
-                    evs_arr = calc_cache[source_label].get(choice_meta["clean"], {}).get("evs")
-                    if evs_arr is None or evs_arr.size == 0:
-                        return
-                    outcomes = np.array(evs_arr, dtype=float) * amt
-                    outcomes = outcomes[np.isfinite(outcomes)]
-                    if outcomes.size == 0:
-                        return
-                    values = np.quantile(outcomes, percentiles)
-                    traces.append(go.Scatter(
-                        x=percentiles * 100,
-                        y=values,
-                        mode="lines",
-                        name=PRETTY_LBM.get(choice_meta["clean"], choice_meta["clean"]) if source_label == "Global" else PRETTY_SPX.get(choice_meta["clean"], choice_meta["clean"])
-                    ))
-                    found[0] = True
-                _add_trace("Global", annual_alloc_choice_global)
-                _add_trace("SP500", annual_alloc_choice_spx)
-                if not found[0]:
-                    st.info("Pick at least one annual allocation above to plot percentiles.")
-                else:
-                    fig = go.Figure(traces)
-                    fig.update_layout(
-                        xaxis_title="Percentile",
-                        yaxis_title="Ending value ($)",
-                        yaxis_tickformat=",.0f",
-                        template="plotly_white",
-                    )
-                    _render_plotly(fig)
-
-    # ------------------------------------------------------------
-    # Failure Distribution (when investing the Required Annual) for selected allocation(s)
-    # ------------------------------------------------------------
-    if output_mode in ("Failure distribution","All"):
-        st.markdown("#### Failure Distribution (Selected Allocation)")
-        st.caption(f"Adds the {current_conf_pct:.0f}% confidence current-portfolio floor to each outcome before measuring failures.")
-    failure_rows = []
-
-    def _failure_stats_ann(raw_col: str, stats: dict, required_amt: float, label_source: str, floor_val: float):
-        evs_arr = stats.get("evs") if stats else None
-        if evs_arr is None or evs_arr.size == 0 or not np.isfinite(required_amt):
-            return
-        arr = np.array(evs_arr, dtype=float) * float(required_amt)
-        if floor_val:
-            arr = arr + float(floor_val)
-        total = int(arr.size)
-        fails = arr < float(ideal_goal)
-        num_fail = int(fails.sum())
-        if num_fail == 0:
-            failure_rows.append({
-                "Source": label_source,
-                "Allocation": raw_col,
-                "Windows": total,
-                "Failures": 0,
-                "Failure Rate": "0.0%",
-                "Worst": "",
-                "P25": "",
-                "Median": "",
-                "P75": ""
-            })
-            return
-        failed = arr[fails]
-        p25 = np.percentile(failed, 25)
-        p50 = np.percentile(failed, 50)
-        p75 = np.percentile(failed, 75)
-        worst = failed.min()
-        failure_rows.append({
-            "Source": label_source,
-            "Allocation": raw_col,
-            "Windows": total,
-            "Failures": num_fail,
-            "Failure Rate": f"{(num_fail/total):.1%}",
-            "Worst": f"${worst:,.0f}",
-            "P25": f"${p25:,.0f}",
-            "Median": f"${p50:,.0f}",
-            "P75": f"${p75:,.0f}",
-            "Failure Rate Raw": num_fail / total,
-            "Failures Raw": num_fail,
-            "Worst Raw": worst,
-            "Median Raw": p50,
-        })
-
-    # Analyze selected annual allocations
-    def _run_failure_for_source(source: str, choice_meta):
-        if not choice_meta:
-            return
-        raw_col = choice_meta["clean"]
-        stats = calc_cache[source].get(raw_col)
-        sel = selected_rows.get(source)
-        if not stats or not sel:
-            return
-        req_amt = sel.get("Required Annual")
-        if req_amt is None or not np.isfinite(req_amt):
-            return
-        _failure_stats_ann(raw_col, stats, float(req_amt), source, lump_floor.get(source, 0.0))
-
-    _run_failure_for_source("Global", annual_alloc_choice_global)
-    _run_failure_for_source("SP500", annual_alloc_choice_spx)
-
-    if output_mode in ("Failure distribution","All"):
-        if failure_rows:
-            fail_df = pd.DataFrame(failure_rows)
-            # Friendlier allocation label in output
-            def _friendly_alloc_fail(raw_name, source):
-                if source == "Global":
-                    return PRETTY_LBM.get(raw_name, raw_name)
-                else:
-                    return PRETTY_SPX.get(raw_name, raw_name)
-            fail_df["Allocation"] = fail_df.apply(lambda r: _friendly_alloc_fail(r["Allocation"], r["Source"]), axis=1)
-            st.data_editor(
-                fail_df,
-                hide_index=True,
-                disabled=True,
-                width="stretch",
-                column_config={
-                    "Source": st.column_config.TextColumn("Source", help="Data source used."),
-                    "Allocation": st.column_config.TextColumn("Allocation", help="Selected annual allocation at current settings."),
-                    "Windows": st.column_config.NumberColumn("Windows", help="Number of valid rolling windows."),
-                    "Failures": st.column_config.NumberColumn("Failures", help="Count of windows that ended below Ideal Goal."),
-                    "Failure Rate": st.column_config.TextColumn("Failure Rate", help="Failures / Windows."),
-                    "Worst": st.column_config.TextColumn("Worst", help="Worst ending value among failures."),
-                    "P25": st.column_config.TextColumn("P25", help="25th percentile of failure endings."),
-                    "Median": st.column_config.TextColumn("Median", help="Median failure ending value."),
-                    "P75": st.column_config.TextColumn("P75", help="75th percentile (less-bad failure)."),
-                }
-            )
-        else:
-            st.info("No failures at the selected settings for the chosen allocation(s).")
-
-    # ------------------------------------------------------------
-    # Success Distribution (when investing the Required Annual) for selected allocation(s)
-    # ------------------------------------------------------------
-    success_rows = []
-    if output_mode in ("Success distribution","All"):
-        st.markdown("#### Success Distribution (Selected Allocation)")
-        st.caption(f"Same combined balance: required annual contributions plus the {current_conf_pct:.0f}% confidence current-portfolio floor.")
-
-    def _success_stats_ann(raw_col: str, stats: dict, required_amt: float, label_source: str, floor_val: float):
-        evs_arr = stats.get("evs") if stats else None
-        if evs_arr is None or evs_arr.size == 0 or not np.isfinite(required_amt):
-            return
-        arr = np.array(evs_arr, dtype=float) * float(required_amt)
-        if floor_val:
-            arr = arr + float(floor_val)
-        total = int(arr.size)
-        succ_mask = arr >= float(ideal_goal)
-        num_succ = int(succ_mask.sum())
-        if num_succ == 0:
-            success_rows.append({
-                "Source": label_source,
-                "Allocation": raw_col,
-                "Windows": total,
-                "Successes": 0,
-                "Success Rate": "0.0%",
-                "Min": "",
-                "P25": "",
-                "Median": "",
-                "P75": "",
-                "Best": ""
-            })
-            return
-        succ = arr[succ_mask]
-        p25 = np.percentile(succ, 25)
-        p50 = np.percentile(succ, 50)
-        p75 = np.percentile(succ, 75)
-        best = succ.max()
-        min_succ = succ.min()
-        success_rows.append({
-            "Source": label_source,
-            "Allocation": raw_col,
-            "Windows": total,
-            "Successes": num_succ,
-            "Success Rate": f"{(num_succ/total):.1%}",
-            "Min": f"${min_succ:,.0f}",
-            "P25": f"${p25:,.0f}",
-            "Median": f"${p50:,.0f}",
-            "P75": f"${p75:,.0f}",
-            "Best": f"${best:,.0f}",
-            "Success Rate Raw": num_succ / total,
-            "P25 Raw": p25,
-        })
-
-    def _run_success_for_source(source: str, choice_meta):
-        if not choice_meta:
-            return
-        raw_col = choice_meta["clean"]
-        stats = calc_cache[source].get(raw_col)
-        sel = selected_rows.get(source)
-        if not stats or not sel:
-            return
-        req_amt = sel.get("Required Annual")
-        if req_amt is None or not np.isfinite(req_amt):
-            return
-        _success_stats_ann(raw_col, stats, float(req_amt), source, lump_floor.get(source, 0.0))
-
-    _run_success_for_source("Global", annual_alloc_choice_global)
-    _run_success_for_source("SP500", annual_alloc_choice_spx)
-
-    if output_mode in ("Success distribution","All"):
-        if success_rows:
-            succ_df = pd.DataFrame(success_rows)
-            def _friendly_alloc_succ(raw_name, source):
-                if source == "Global":
-                    return PRETTY_LBM.get(raw_name, raw_name)
-                else:
-                    return PRETTY_SPX.get(raw_name, raw_name)
-            succ_df["Allocation"] = succ_df.apply(lambda r: _friendly_alloc_succ(r["Allocation"], r["Source"]), axis=1)
-            st.data_editor(
-                succ_df,
-                hide_index=True,
-                disabled=True,
-                width="stretch",
-                column_config={
-                    "Source": st.column_config.TextColumn("Source", help="Data source used."),
-                    "Allocation": st.column_config.TextColumn("Allocation", help="Selected annual allocation at current settings."),
-                    "Windows": st.column_config.NumberColumn("Windows", help="Number of valid rolling windows."),
-                    "Successes": st.column_config.NumberColumn("Successes", help="Count of windows that ended at/above Ideal Goal."),
-                    "Success Rate": st.column_config.TextColumn("Success Rate", help="Successes / Windows."),
-                    "Min": st.column_config.TextColumn("Min", help="Worst ending value among successes (still ≥ Ideal Goal)."),
-                    "P25": st.column_config.TextColumn("P25", help="25th percentile of successful endings."),
-                    "Median": st.column_config.TextColumn("Median", help="Median successful ending value."),
-                    "P75": st.column_config.TextColumn("P75", help="75th percentile of successful endings."),
-                    "Best": st.column_config.TextColumn("Best", help="Best ending value among successes."),
-                }
-            )
-        else:
-            st.info("No successes found at the selected settings for the chosen allocation(s).")
-
-    if output_mode in ("Required annual tables","All") and summary_details:
-        fail_lookup = {r["Source"]: r for r in failure_rows}
-        succ_lookup = {r["Source"]: r for r in success_rows}
-        st.subheader("Result Explanation (plain text)")
-        if floor_descriptions:
-            tail_pct = max(0.0, 100 - float(current_conf_pct))
-            for desc in floor_descriptions:
-                st.text(
-                    f"Your existing retirement savings will be invested conservatively in {desc['label']}. "
-                    f"This gives you a safety net of about {desc['amount']}—money we're {current_conf_pct:.0f}% confident will be there "
-                    f"(only about a {tail_pct:.0f}% chance it ends below that floor in {desc['source']})."
-                )
-        for det in summary_details:
-            src = det["source"]
-            req_text = _fmt_currency(det["required"])
-            succ = succ_lookup.get(src, {})
-            fail = fail_lookup.get(src, {})
-            success_rate = succ.get("Success Rate", f"{conf_pct_ideal:.0f}% target")
-            p25_text = succ.get("P25", "N/A")
-            failure_rate = fail.get("Failure Rate", "0.0%")
-            num_fail = fail.get("Failures Raw", 0)
-            worst_txt = fail.get("Worst", "N/A")
-            median_txt = fail.get("Median", "N/A")
-            with st.container():
-                st.markdown(f"**{src} Scenario**")
-                st.text(f"To reach your ${ideal_goal:,.0f} goal, you'll need to add {req_text} per year for {int(num_years)} years, invested in the {src} {det['annual_label']} portfolio.")
-                st.text(f"Historically, 9 out of 10 of the historical audits hit or beat the goal (success rate {success_rate}); the typical outcome (median success) was {p25_text}.")
-                st.text(f"In the rare misses (~{failure_rate}, or {num_fail} historical audits), the worst ending value was {worst_txt} and the typical shortfall (median failure) was {median_txt}.")
-
-    # Charts (separate), highlight selected allocation (fallback to minimum if none)
-    if output_mode in ("Required annual tables","All"):
-        chart_df = wide_req.copy()
-        if not chart_df.empty:
-            n = len(chart_df)
-            # Global chart
-            if "Global" in chart_df.columns and chart_df["Global"].notna().any():
-                g_vals = chart_df["Global"]
-                g_colors = ["#9ecae1"] * n
-                target_label = selected_labels.get("Global")
-                if target_label and target_label in chart_df["Allocation"].values:
-                    g_target_idx = chart_df.index[chart_df["Allocation"] == target_label][0]
-                    g_colors[g_target_idx] = "#2ca02c"
-                elif g_vals.notna().any():
-                    g_min_pos = g_vals[g_vals.notna()].idxmin()
-                    try: g_i = chart_df.index.get_loc(g_min_pos)
-                    except Exception: g_i = int(g_min_pos) if isinstance(g_min_pos,(int,np.integer)) else None
-                    if g_i is not None and 0 <= g_i < n: g_colors[g_i] = "#2ca02c"
-                fig_g = go.Figure()
-                fig_g.add_bar(name="Global", x=chart_df["Allocation"], y=g_vals, marker_color=g_colors)
-                fig_g.update_layout(title="Required Annual — Global", xaxis_title="Allocation", yaxis_title="Required Annual ($)",
-                                    yaxis=dict(tickformat=",.0f", tickprefix="$"), showlegend=False)
-                _render_plotly(fig_g)
-            # SP500 chart
-            if "SP500" in chart_df.columns and chart_df["SP500"].notna().any():
-                s_vals = chart_df["SP500"]
-                s_colors = ["#3182bd"] * n
-                target_label = selected_labels.get("SP500")
-                if target_label and target_label in chart_df["Allocation"].values:
-                    s_target_idx = chart_df.index[chart_df["Allocation"] == target_label][0]
-                    s_colors[s_target_idx] = "#D95F02"
-                elif s_vals.notna().any():
-                    s_min_pos = s_vals[s_vals.notna()].idxmin()
-                    try: s_i = chart_df.index.get_loc(s_min_pos)
-                    except Exception: s_i = int(s_min_pos) if isinstance(s_min_pos,(int,np.integer)) else None
-                    if s_i is not None and 0 <= s_i < n: s_colors[s_i] = "#D95F02"
-                fig_s = go.Figure()
-                fig_s.add_bar(name="SP500", x=chart_df["Allocation"], y=s_vals, marker_color=s_colors)
-                fig_s.update_layout(title="Required Annual — SP500", xaxis_title="Allocation", yaxis_title="Required Annual ($)",
-                                    yaxis=dict(tickformat=",.0f", tickprefix="$"), showlegend=False)
-                _render_plotly(fig_s)
-
-    # Download (CSV)
-    csv = wide_req.to_csv(index=False)
-    st.download_button("Download CSV", data=csv, file_name="required_annual_by_allocation.csv", mime="text/csv")
-
-
-# ------------------------------
-# Disclosures Download Section
-# ------------------------------
-st.divider()
-st.subheader("Disclosures")
-
-pdf_candidates = [
-    ("Global (LBM)", "DataSource LBM Portfolios.pdf"),
-    ("S&P 500 (SPX)", "DataSource SPX_e portfolios.pdf"),
-]
-
-for label, pdf_file in pdf_candidates:
+for idx in range(1, 4):
+    metas = metas_for_source
+    default_clean = _default_clean_for(selected_source, default_percents.get(idx, 100))
     try:
-        with open(pdf_file, "rb") as f:
-            pdf_bytes = f.read()
-        st.download_button(
-            f"Download {label} Disclosures (PDF)",
-            data=pdf_bytes,
-            file_name=pdf_file,
-            mime="application/pdf",
-        )
-    except FileNotFoundError:
-        st.info(f"Add `{pdf_file}` to the app folder to enable {label} disclosures.")
+        default_index = clean_options.index(default_clean)
+    except ValueError:
+        default_index = 0 if clean_options else None
+    current_clean = sb.selectbox(
+        f"Scenario {idx} current allocation",
+        options=clean_options,
+        format_func=lambda c: PRETTY_LBM.get(c, PRETTY_SPX.get(c, c)),
+        index=default_index if default_index is not None else 0,
+        key=f"sc{idx}_current"
+    ) if clean_options else None
+    annual_clean = sb.selectbox(
+        f"Scenario {idx} annual allocation",
+        options=clean_options,
+        format_func=lambda c: PRETTY_LBM.get(c, PRETTY_SPX.get(c, c)),
+        index=default_index if default_index is not None else 0,
+        key=f"sc{idx}_annual"
+    ) if clean_options else None
+    scenarios.append({
+        "label": f"Scenario {idx}",
+        "source": selected_source,
+        "current_clean": current_clean,
+        "annual_clean": annual_clean,
+    })
 
-st.markdown('[Click here to go to Main Site](https://www.paulruedi.com)')
+band_traces = []
+cdf_traces = []
+box_traces = []
+perc_marker_traces = []
+slope_traces = []
+low_traces = []
+outcomes_map = {}
+percentiles = np.linspace(0, 1, 101)
+table_percentiles = [0.0, 0.05, 0.1, 0.25, 0.5, 0.75, 0.9, 0.95, 1.0]
+table_rows = []
+colors = ["#1f77b4", "#d62728", "#2ca02c"]
+def _rgba(hex_color: str, alpha: float) -> str:
+    hex_color = hex_color.lstrip("#")
+    if len(hex_color) != 6:
+        return f"rgba(31,119,180,{alpha})"
+    r = int(hex_color[0:2], 16)
+    g = int(hex_color[2:4], 16)
+    b = int(hex_color[4:6], 16)
+    return f"rgba({r},{g},{b},{alpha})"
+
+for sc_idx, sc in enumerate(scenarios):
+    name = f"{sc['label']} ({sc['source']})"
+    outcomes, idxs = _scenario_outcomes(sc["source"], sc["current_clean"], sc["annual_clean"])
+    if outcomes is None:
+        continue
+    outcomes_map[name] = outcomes
+    values = np.quantile(outcomes, percentiles)
+    tab_vals = np.quantile(outcomes, table_percentiles)
+    color = colors[sc_idx % len(colors)] if colors else None
+    lower_val = tab_vals[2]  # P10
+    upper_val = tab_vals[6]  # P90
+    median_val = tab_vals[4]
+    # Band
+    band_traces.append(go.Scatter(
+        x=[0, 100],
+        y=[lower_val, lower_val],
+        line=dict(color=color, width=0),
+        showlegend=False,
+        hoverinfo="skip",
+    ))
+    band_traces.append(go.Scatter(
+        x=[0, 100],
+        y=[upper_val, upper_val],
+        line=dict(color=color, width=0),
+        fill="tonexty",
+        fillcolor=_rgba(color if color else "#1f77b4", 0.18),
+        showlegend=False,
+        hoverinfo="skip",
+    ))
+    # Median line
+    band_traces.append(go.Scatter(
+        x=[0, 100],
+        y=[median_val, median_val],
+        mode="lines",
+        line=dict(color=color, width=2),
+        name=name,
+    ))
+    # CDF trace
+    sorted_outcomes = np.sort(outcomes)
+    if sorted_outcomes.size:
+        probs = np.linspace(0, 100, sorted_outcomes.size)
+        cdf_traces.append(go.Scatter(
+            x=sorted_outcomes,
+            y=probs,
+            mode="lines",
+            name=name,
+            line=dict(color=color),
+        ))
+    # Box/violin (box for simplicity)
+    box_traces.append(go.Box(
+        y=outcomes,
+        name=name,
+        marker_color=color,
+        boxmean=True,
+        hovertemplate=f"{name}<br>%{{y:,.0f}}<extra></extra>",
+    ))
+    # Percentile slope points
+    slope_labels = ["P0","P5","P10","P25","P50","P75","P90","P95","P100"]
+    slope_values = [
+        tab_vals[0], tab_vals[1], tab_vals[2], tab_vals[3], tab_vals[4],
+        tab_vals[5], tab_vals[6], tab_vals[7], tab_vals[8]
+    ]
+    slope_traces.append(go.Scatter(
+        x=slope_labels,
+        y=slope_values,
+        mode="lines+markers",
+        name=name,
+        line=dict(color=color),
+    ))
+    low_traces.append(go.Scatter(
+        x=["P0","P5","P10"],
+        y=[tab_vals[0], tab_vals[1], tab_vals[2]],
+        mode="lines+markers",
+        name=name,
+        line=dict(color=color),
+    ))
+    # Box with jittered points
+    box_traces.append(go.Box(
+        y=outcomes,
+        name=name,
+        marker_color=color,
+        boxmean=True,
+        boxpoints="all",
+        jitter=0.4,
+        pointpos=0,
+        marker=dict(opacity=0.2, size=4, color=color),
+        hovertemplate=f"{name}<br>%{{y:,.0f}}<extra></extra>",
+    ))
+    p5, p25, p50, p75, p95 = np.percentile(outcomes, [5, 25, 50, 75, 95])
+    perc_marker_traces.append(go.Scatter(
+        x=[name]*5,
+        y=[p5, p25, p50, p75, p95],
+        mode="markers",
+        showlegend=False,
+        marker=dict(
+            color=color,
+            symbol=["triangle-down","line-ns-open","diamond","line-ns-open","triangle-up"],
+            size=[10,8,10,8,10],
+            line=dict(color=color, width=1.5),
+        ),
+        hovertemplate="%{x}<br>%{y:,.0f}<extra></extra>",
+    ))
+    p0_begin = None
+    if idxs is not None and idxs.size > 0:
+        try:
+            min_idx = int(idxs[np.argmin(outcomes)])
+            # Convert row count since June 1927 (0-based) to year-month
+            month_offset = min_idx  # 0 for Jun 1927
+            base = pd.Timestamp("1927-06-30")
+            p0_begin = (base + pd.DateOffset(months=int(month_offset))).strftime("%Y-%m")
+        except Exception:
+            p0_begin = None
+    table_rows.append({
+        "Scenario": sc["label"],
+        "Source": sc["source"],
+        "P0": tab_vals[0],
+        "P0 Begin Month": p0_begin,
+        "P5": tab_vals[1],
+        "P10": tab_vals[2],
+        "P25": tab_vals[3],
+        "P50": tab_vals[4],
+        "P75": tab_vals[5],
+        "P90": tab_vals[6],
+        "P95": tab_vals[7],
+        "P100": tab_vals[8],
+    })
+
+if slope_traces and annual_amount > 0:
+    fig = go.Figure(slope_traces)
+    fig.update_layout(
+        xaxis_title="All Percentiles",
+        yaxis_title="Ending value ($)",
+        yaxis_tickformat=",.0f",
+        template="plotly_white",
+    )
+    _render_plotly(fig)
+    # Low-percentile inset
+    if low_traces:
+        fig_low = go.Figure(low_traces)
+        fig_low.update_layout(
+            xaxis_title="Zooming into Lower percentiles",
+            yaxis_title="Ending value ($)",
+            yaxis_tickformat=",.0f",
+            template="plotly_white",
+        )
+        _render_plotly(fig_low)
+else:
+    st.info("Select allocations and enter a positive annual investment to see the slope view.")
+
+if table_rows and annual_amount > 0:
+    tbl = pd.DataFrame(table_rows)
+    for col in ["P0","P5","P10","P25","P50","P75","P90","P95","P100"]:
+        tbl[col] = tbl[col].apply(_fmt_currency)
+    st.subheader("Scenario Percentiles")
+    st.table(tbl)
+
+st.stop()
