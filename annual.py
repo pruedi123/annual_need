@@ -12,6 +12,7 @@ PRETTY_LBM = {'LBM 100E':'100% Equity','LBM 90E':'90% Equity','LBM 80E':'80% Equ
 PRETTY_SPX = {f"spx{p}e": f"{p}% Equity" for p in [100,90,80,70,60,50,40,30,20,10,0]}
 GENERIC_ORDER = ["100% Equity","90% Equity","80% Equity","70% Equity","60% Equity","50% Equity",
                  "40% Equity","30% Equity","20% Equity","10% Equity","100% Fixed"]
+CPI_FILE_PATH = "cpi_mo_returns_factors.xlsx"
 
 ##############################
 # App: Required Annual Invest
@@ -45,6 +46,17 @@ data_choice = sb.selectbox(
     index=0,
     help="Choose the factor set: LBM workbook (Excel) or S&P 500 workbook (spx_factors.xlsx).",
 )
+returns_basis = sb.radio(
+    "Returns basis",
+    ["Real", "Nominal"],
+    index=0,
+    help=(
+        "Real returns are already inflation-adjusted. "
+        "Nominal returns multiply each historical window by CPI inflation factors "
+        f"({CPI_FILE_PATH}) to reflect the dollar value of past periods."
+    ),
+)
+nominal_mode = (returns_basis == "Nominal")
 ideal_goal = sb.number_input(
     "Ideal Goal ($)", min_value=1, step=50000, value=2_500_000,
     help="Today’s dollars: same buying power as money today.",
@@ -86,6 +98,7 @@ fee_pct = sb.slider(
     help="Applied once per 12-month factor: net = gross × (1 − fee). 0.20 % = 20 basis points."
 )
 
+
 row_increment = 12  # Data is monthly, so step 12 rows per year
 
 st.divider()
@@ -96,18 +109,78 @@ elif data_choice.startswith("Global"):
     src_kind = "LBM"
 else:
     src_kind = "SPX"
-df_lbm, df_spx = None, None
-try:
-    if src_kind in ("LBM", "BOTH"):
-        df_lbm = pd.read_excel(file_path, sheet_name=sheet_name)
-except Exception as e:
-    st.error(f"Error loading LBM factors: {e}")
-try:
-    if src_kind in ("SPX", "BOTH"):
-        df_spx = pd.read_excel(spx_file_path, sheet_name=spx_sheet_name)
-except Exception as e:
-    st.error(f"Error loading SPX factors: {e}")
 
+df_lbm, df_spx = None, None
+df_spx_base = None
+spx_needed = src_kind in ("SPX", "BOTH") or nominal_mode
+if src_kind in ("LBM", "BOTH"):
+    try:
+        df_lbm = pd.read_excel(file_path, sheet_name=sheet_name)
+        df_lbm = df_lbm.dropna(how="all").reset_index(drop=True)
+    except Exception as e:
+        st.error(f"Error loading LBM factors: {e}")
+if spx_needed:
+    try:
+        df_spx_base = pd.read_excel(spx_file_path, sheet_name=spx_sheet_name)
+        df_spx_base = df_spx_base.dropna(how="all").reset_index(drop=True)
+        if src_kind in ("SPX", "BOTH"):
+            df_spx = df_spx_base.copy()
+    except Exception as e:
+        if src_kind in ("SPX", "BOTH"):
+            st.error(f"Error loading SPX factors: {e}")
+        elif nominal_mode:
+            st.error(f"Nominal returns require SPX data for CPI alignment: {e}")
+def _load_cpi_monthly(path):
+    """Return a cleaned Date/inflation-factor frame or None if it cannot be built."""
+    try:
+        df = pd.read_excel(path)
+    except Exception:
+        return None
+    df = df.rename(columns=lambda c: str(c).strip())
+    if "Date" not in df.columns or "cpi" not in df.columns:
+        return None
+    df = df[["Date", "cpi"]].copy()
+    df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
+    df["cpi"] = pd.to_numeric(df["cpi"], errors="coerce")
+    df = df.dropna(subset=["Date", "cpi"])
+    if df.empty:
+        return None
+    df = df.sort_values("Date").reset_index(drop=True)
+    df["inflation_factor"] = 1.0 + df["cpi"]
+    return df[["Date", "inflation_factor"]]
+
+
+def _build_nominal_inflation_series(spx_dates_df, cpi_df):
+    """Return inflation-factor series aligned with the SPX window rows or None."""
+    if spx_dates_df is None or cpi_df is None:
+        return None
+    if "begin month" not in spx_dates_df.columns or "end month" not in spx_dates_df.columns:
+        return None
+    begins = pd.to_datetime(spx_dates_df["begin month"], errors="coerce")
+    ends = pd.to_datetime(spx_dates_df["end month"], errors="coerce")
+    monthly = cpi_df[["Date", "inflation_factor"]].copy()
+    result = []
+    for start, end in zip(begins, ends):
+        if pd.isna(start) or pd.isna(end):
+            result.append(np.nan)
+            continue
+        window = monthly[(monthly["Date"] >= start) & (monthly["Date"] <= end)]
+        if window.shape[0] != 12:
+            result.append(np.nan)
+            continue
+        result.append(float(window["inflation_factor"].prod()))
+    return pd.Series(result, index=spx_dates_df.index)
+
+
+def _apply_nominal_adjustment(df, cols, inflation_series, label):
+    """Multiply the requested columns by CPI inflation factors if any are available."""
+    if df is None or not cols or inflation_series is None:
+        return False
+    aligned = inflation_series.reindex(df.index)
+    if aligned.isna().all():
+        return False
+    df.loc[:, cols] = df[cols].multiply(aligned, axis=0)
+    return True
 allocation_cols_lbm, allocation_cols_spx = [], []
 allocation_meta_lbm, allocation_meta_spx = [], []
 if df_lbm is not None:
@@ -126,6 +199,27 @@ if src_kind in ("LBM","BOTH") and not allocation_cols_lbm:
     st.warning("No allocation columns found in LBM (expected headers starting with 'LBM ').")
 if src_kind in ("SPX","BOTH") and not allocation_cols_spx:
     st.warning("No allocation columns found in SPX (expected headers like 'spx60e', 'spx40e', etc.).")
+
+inflation_series = None
+if nominal_mode:
+    if df_spx_base is None:
+        st.error("Nominal returns require SPX factor windows (spx_factors.xlsx) for CPI alignment.")
+    else:
+        cpi_df = _load_cpi_monthly(CPI_FILE_PATH)
+        if cpi_df is None:
+            st.error(f"Could not load CPI data from {CPI_FILE_PATH}; nominal returns stay disabled.")
+        else:
+            inflation_series = _build_nominal_inflation_series(df_spx_base, cpi_df)
+            if inflation_series is None or inflation_series.dropna().empty:
+                st.warning("Nominal returns are enabled but CPI coverage does not span the available windows.")
+    applied_nominal = False
+    if inflation_series is not None:
+        if df_lbm is not None:
+            applied_nominal |= _apply_nominal_adjustment(df_lbm, allocation_cols_lbm, inflation_series, "Global")
+        if df_spx is not None:
+            applied_nominal |= _apply_nominal_adjustment(df_spx, allocation_cols_spx, inflation_series, "SP500")
+        if not applied_nominal and (df_lbm is not None or df_spx is not None):
+            st.warning("Nominal returns requested but no windows matched the CPI data; results remain real.")
 
 def _meta_by_clean(metas, clean):
     if not metas or clean is None:
@@ -181,6 +275,60 @@ def _fmt_currency(val):
     except TypeError:
         return "N/A"
     return f"${val:,.0f}"
+
+CPI_FILE_PATH = "cpi_mo_returns_factors.xlsx"
+
+def _load_cpi_monthly(path):
+    """Return a cleaned Date/inflation-factor frame or None if it cannot be built."""
+    try:
+        df = pd.read_excel(path)
+    except Exception:
+        return None
+    df = df.rename(columns=lambda c: str(c).strip())
+    if "Date" not in df.columns or "cpi" not in df.columns:
+        return None
+    df = df[["Date", "cpi"]].copy()
+    df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
+    df["cpi"] = pd.to_numeric(df["cpi"], errors="coerce")
+    df = df.dropna(subset=["Date", "cpi"])
+    if df.empty:
+        return None
+    df = df.sort_values("Date").reset_index(drop=True)
+    df["inflation_factor"] = 1.0 + df["cpi"]
+    return df[["Date", "inflation_factor"]]
+
+
+def _build_nominal_inflation_series(spx_dates_df, cpi_df):
+    """Return inflation-factor series aligned with the SPX window rows or None."""
+    if spx_dates_df is None or cpi_df is None:
+        return None
+    if "begin month" not in spx_dates_df.columns or "end month" not in spx_dates_df.columns:
+        return None
+    begins = pd.to_datetime(spx_dates_df["begin month"], errors="coerce")
+    ends = pd.to_datetime(spx_dates_df["end month"], errors="coerce")
+    monthly = cpi_df[["Date", "inflation_factor"]].copy()
+    result = []
+    for start, end in zip(begins, ends):
+        if pd.isna(start) or pd.isna(end):
+            result.append(np.nan)
+            continue
+        window = monthly[(monthly["Date"] >= start) & (monthly["Date"] <= end)]
+        if window.shape[0] != 12:
+            result.append(np.nan)
+            continue
+        result.append(float(window["inflation_factor"].prod()))
+    return pd.Series(result, index=spx_dates_df.index)
+
+
+def _apply_nominal_adjustment(df, cols, inflation_series, label):
+    """Multiply the requested columns by CPI inflation factors if any are available."""
+    if df is None or not cols or inflation_series is None:
+        return False
+    aligned = inflation_series.reindex(df.index)
+    if aligned.isna().all():
+        return False
+    df.loc[:, cols] = df[cols].multiply(aligned, axis=0)
+    return True
 
 if ((src_kind in ("LBM","BOTH") and allocation_meta_lbm) or
     (src_kind in ("SPX","BOTH") and allocation_meta_spx)):
