@@ -58,7 +58,7 @@ returns_basis = sb.radio(
 )
 nominal_mode = (returns_basis == "Nominal")
 ideal_goal = sb.number_input(
-    "Ideal Goal ($)", min_value=1, step=50000, value=2_500_000,
+    "Ideal Goal ($)", min_value=1, step=50000, value=3_500_000,
     help="Today’s dollars: same buying power as money today.",
     format="%i"
 )
@@ -67,17 +67,17 @@ conf_pct_ideal = sb.slider(
     help="e.g., 90% means ≥90% of historical simulations (audits) finish at/above the Ideal Goal."
 )
 ideal_conf_level = conf_pct_ideal / 100.0
-num_years = sb.number_input("Years", min_value=1, max_value=60, value=4)
+num_years = sb.number_input("Years", min_value=1, max_value=60, value=6)
 acceptable_goal = sb.number_input(
     "Essential Goal ($)",
     min_value=1,
     step=50000,
-    value=2_000_000,
+    value=3_000_000,
     help="A minimum acceptable outcome (floor) which means that you do not want less than this amount. In other words, you want to be 100% confident of reaching at least this amount.",
     format="%i",
 )
 current_portfolio_value = sb.number_input(
-    "Current Portfolio Value ($)", min_value=0, step=50_000, value=2_000_000,
+    "Current Portfolio Value ($)", min_value=0, step=50_000, value=1_100_000,
     help="How much is already invested today. It compounds through the historical windows alongside new contributions.",
     format="%i"
 )
@@ -545,13 +545,27 @@ if sb.button("Apply Manual Selection", use_container_width=True):
     st.session_state["solver_rows_display"] = None
     _rerun()
 run_solver = sb.button("Let the app pick allocations for me", use_container_width=True)
-show_outputs = sb.radio(
-    "View detailed results?",
-    options=["Show", "Hide"],
+output_mode = sb.radio(
+    "Output view",
+    options=[
+        "Required annual tables",
+        "Percentile chart",
+        "Failure distribution",
+        "Success distribution",
+        "Solver recommendation",
+        "All",
+    ],
     index=1,
-    horizontal=True,
-    key="toggle_outputs"
-) == "Show"
+    help="Choose which output to render in the main area.",
+)
+annual_invest_sim = sb.number_input(
+    "Annual investment to simulate ($)",
+    min_value=0,
+    value=250_000,
+    step=25_000,
+    format="%i",
+    help="Used for the percentile chart button below (ignores the solver and the current-portfolio floor)."
+)
 
 if run_solver:
     solver_rows = []
@@ -720,7 +734,7 @@ if have_any:
                 "amount": _fmt_currency(lump_floor.get("SP500", 0.0)),
                 "label": label
             })
-        if show_outputs and floor_rows:
+        if output_mode in ("Required annual tables","All") and floor_rows:
             st.subheader(f"Current Portfolio Floor ({current_conf_pct:.0f}% Confidence)")
             st.caption("Historical outcome for today's balance, assuming it remains in the chosen allocation.")
             st.table(pd.DataFrame(floor_rows))
@@ -752,7 +766,7 @@ if have_any:
             "required": req if req is not None and np.isfinite(req) else None,
             "ending": end_val if end_val is not None and np.isfinite(end_val) else None,
         })
-    if show_outputs:
+    if output_mode in ("Required annual tables","All"):
         if summary_rows:
             st.subheader("Selected Allocation Results")
             st.caption("Compares the chosen annual contribution allocation with the current-portfolio floor.")
@@ -761,7 +775,7 @@ if have_any:
             st.info("Select at least one annual contribution allocation above to view results.")
 
     solver_rows_display = st.session_state.get("solver_rows_display")
-    if show_outputs and solver_rows_display:
+    if output_mode in ("Solver recommendation","All") and solver_rows_display:
         solver_df = pd.DataFrame(solver_rows_display)
         for col in ["Floor","Required Annual","Ending Value"]:
             if col in solver_df.columns:
@@ -813,9 +827,55 @@ if have_any:
 
 
     # ------------------------------------------------------------
+    # Percentile chart for a fixed annual investment (no floor)
+    # ------------------------------------------------------------
+    if output_mode in ("Percentile chart","All"):
+        st.markdown("#### Percentile Distribution (Fixed Annual Investment)")
+        st.caption("Uses your annual investment input; ignores the solver and any current-portfolio floor.")
+        if st.button("Plot percentile chart", use_container_width=True, key="plot_percentiles"):
+            amt = float(annual_invest_sim or 0)
+            if amt <= 0:
+                st.warning("Enter a positive annual investment to plot percentiles.")
+            else:
+                traces = []
+                found = [False]
+                percentiles = np.linspace(0, 1, 101)
+                def _add_trace(source_label, choice_meta):
+                    if not choice_meta:
+                        return
+                    evs_arr = calc_cache[source_label].get(choice_meta["clean"], {}).get("evs")
+                    if evs_arr is None or evs_arr.size == 0:
+                        return
+                    outcomes = np.array(evs_arr, dtype=float) * amt
+                    outcomes = outcomes[np.isfinite(outcomes)]
+                    if outcomes.size == 0:
+                        return
+                    values = np.quantile(outcomes, percentiles)
+                    traces.append(go.Scatter(
+                        x=percentiles * 100,
+                        y=values,
+                        mode="lines",
+                        name=PRETTY_LBM.get(choice_meta["clean"], choice_meta["clean"]) if source_label == "Global" else PRETTY_SPX.get(choice_meta["clean"], choice_meta["clean"])
+                    ))
+                    found[0] = True
+                _add_trace("Global", annual_alloc_choice_global)
+                _add_trace("SP500", annual_alloc_choice_spx)
+                if not found[0]:
+                    st.info("Pick at least one annual allocation above to plot percentiles.")
+                else:
+                    fig = go.Figure(traces)
+                    fig.update_layout(
+                        xaxis_title="Percentile",
+                        yaxis_title="Ending value ($)",
+                        yaxis_tickformat=",.0f",
+                        template="plotly_white",
+                    )
+                    _render_plotly(fig)
+
+    # ------------------------------------------------------------
     # Failure Distribution (when investing the Required Annual) for selected allocation(s)
     # ------------------------------------------------------------
-    if show_outputs:
+    if output_mode in ("Failure distribution","All"):
         st.markdown("#### Failure Distribution (Selected Allocation)")
         st.caption(f"Adds the {current_conf_pct:.0f}% confidence current-portfolio floor to each outcome before measuring failures.")
     failure_rows = []
@@ -881,7 +941,7 @@ if have_any:
     _run_failure_for_source("Global", annual_alloc_choice_global)
     _run_failure_for_source("SP500", annual_alloc_choice_spx)
 
-    if show_outputs:
+    if output_mode in ("Failure distribution","All"):
         if failure_rows:
             fail_df = pd.DataFrame(failure_rows)
             # Friendlier allocation label in output
@@ -915,7 +975,7 @@ if have_any:
     # Success Distribution (when investing the Required Annual) for selected allocation(s)
     # ------------------------------------------------------------
     success_rows = []
-    if show_outputs:
+    if output_mode in ("Success distribution","All"):
         st.markdown("#### Success Distribution (Selected Allocation)")
         st.caption(f"Same combined balance: required annual contributions plus the {current_conf_pct:.0f}% confidence current-portfolio floor.")
 
@@ -980,7 +1040,7 @@ if have_any:
     _run_success_for_source("Global", annual_alloc_choice_global)
     _run_success_for_source("SP500", annual_alloc_choice_spx)
 
-    if show_outputs:
+    if output_mode in ("Success distribution","All"):
         if success_rows:
             succ_df = pd.DataFrame(success_rows)
             def _friendly_alloc_succ(raw_name, source):
@@ -1010,7 +1070,7 @@ if have_any:
         else:
             st.info("No successes found at the selected settings for the chosen allocation(s).")
 
-    if summary_details:
+    if output_mode in ("Required annual tables","All") and summary_details:
         fail_lookup = {r["Source"]: r for r in failure_rows}
         succ_lookup = {r["Source"]: r for r in success_rows}
         st.subheader("Result Explanation (plain text)")
@@ -1040,7 +1100,7 @@ if have_any:
                 st.text(f"In the rare misses (~{failure_rate}, or {num_fail} historical audits), the worst ending value was {worst_txt} and the typical shortfall (median failure) was {median_txt}.")
 
     # Charts (separate), highlight selected allocation (fallback to minimum if none)
-    if show_outputs:
+    if output_mode in ("Required annual tables","All"):
         chart_df = wide_req.copy()
         if not chart_df.empty:
             n = len(chart_df)
