@@ -782,17 +782,17 @@ if table_rows and annual_amount > 0:
         diff_worst_val = s3_p0_num - s1_p0_num if s1_p0_num is not None and s3_p0_num is not None else None
         diff_worst = _fmt_currency(diff_worst_val) if diff_worst_val is not None else ""
         st.text("You're deciding between three strategies. Here's what each one means for you:")
-        st.text(f"Scenario 1 (100% stocks): Swing for the fences")
+        st.markdown(f"**Scenario 1 (100% stocks): Swing for the fences**")
         st.text(f"  If markets are good (P75): You could end up with {s1_p75}")
         st.text(f"  If markets are terrible: You could end up with {s1_p0}")
         st.text(f"  Most likely (middle): {s1_p50}")
-        st.text(f"Scenario 3 (60% stocks, 40% bonds): Play it safer")
+        st.markdown(f"**Scenario 3 (60% stocks, 40% bonds): Play it safer**")
         st.text(f"  If markets are good (P75): You could end up with {s3_p75}")
         st.text(f"  If markets are terrible: You could end up with {s3_p0}")
         st.text(f"  Most likely (middle): {s3_p50}")
         if s2 is not None:
             s2_p0, s2_p50, s2_p75 = _fmt_safe(s2,"P0"), _fmt_safe(s2,"P50"), _fmt_safe(s2,"P75")
-            st.text("Scenario 2 (80% stocks): The compromise")
+            st.markdown("**Scenario 2 (80% stocks): The compromise**")
             st.text(f"  Floor (P0): {s2_p0}")
             st.text(f"  Middle (P50): {s2_p50}")
             st.text(f"  If markets are good (P75): {s2_p75}")
