@@ -757,88 +757,48 @@ if table_rows and annual_amount > 0:
     tbl = tbl.rename(columns={"P0 Begin": "P0 Begin Row"})
     st.subheader("Scenario Percentiles")
     st.table(tbl)
-    # Summary referencing P50 with P5/P0 context (plain text)
+    # Plain-language summary (simplified)
     st.subheader("Readable Summary")
-    def _num(series):
-        return pd.to_numeric(series.astype(str).str.replace("[^0-9.-]", "", regex=True), errors="coerce")
-    p50_num = _num(tbl.get("P50", pd.Series(dtype=float)))
-    if p50_num.notna().any():
-        best_idx = int(p50_num.idxmax())
-        worst_idx = int(p50_num.idxmin())
-        best_row = tbl.loc[best_idx]
-        worst_row = tbl.loc[worst_idx] if worst_idx in tbl.index else None
-        best_val_num = p50_num.loc[best_idx]
-        worst_val_num = p50_num.loc[worst_idx] if worst_row is not None else None
-        diff_txt = ""
-        if worst_row is not None and pd.notna(best_val_num) and pd.notna(worst_val_num):
-            diff_val = best_val_num - worst_val_num
-            diff_txt = (
-                f" The difference between this median outcome and the more conservative strategy of "
-                f"{worst_row['Scenario']} (Current {worst_row.get('Current','')}, Monthly {worst_row.get('Annual','')}) "
-                f"is {_fmt_currency(diff_val)}."
-            )
-        summary_txt_1 = (
-            f"If you focus on upside (P50), the highest P50 is {best_row['P50']} for {best_row['Scenario']} "
-            f"(Current {best_row.get('Current','')}, Monthly {best_row.get('Annual','')}, Source {best_row['Source']})."
-            f"{diff_txt}"
-        )
-        summary_txt_2 = (
-            f"But you need to be comfortable with the downside too: The P5 (5th percentile) means five percent of historical outcomes is equal to or lower than {best_row['P5']} and the lowest historical outcome (P0) is {best_row['P0']}."
-        )
-        st.text(summary_txt_1)
-        st.text(summary_txt_2)
-        # Extra narrative comparing scenarios (if present)
-        scenario_map = {str(r["Scenario"]): r for _, r in tbl.iterrows()}
-        s1 = scenario_map.get("Scenario 1")
-        s2 = scenario_map.get("Scenario 2")
-        s3 = scenario_map.get("Scenario 3")
-        def _currency_num(raw):
-            try:
-                return float(str(raw).replace("$","").replace(",",""))
-            except Exception:
-                return None
-        lines = []
-        if s1 is not None and s3 is not None:
-            s1_best = s1.get("P100")
-            s1_worst = s1.get("P0")
-            s3_best = s3.get("P100")
-            s3_worst = s3.get("P0")
-            s3_worst_val = _currency_num(s3_worst)
-            s1_worst_val = _currency_num(s1_worst)
-            diff_worst = None
-            if s3_worst_val is not None and s1_worst_val is not None:
-                diff_worst = _fmt_currency(s3_worst_val - s1_worst_val)
-            lines.append(
-                f"We’ve modelled three versions of your plan. Scenario 1 (Current {s1.get('Current','')}, Monthly {s1.get('Annual','')}, Source {s1.get('Source','')}) "
-                f"has the highest upside: in the very best historical periods it reached about {s1_best}, but in the worst-ever period it landed around {s1_worst}."
-            )
-            lines.append(
-                f"Scenario 3 (Current {s3.get('Current','')}, Monthly {s3.get('Annual','')}, Source {s3.get('Source','')}) is more balanced. "
-                f"Its best periods reach about {s3_best}, but in the worst-ever period it was about {s3_worst}"
-                + (f", roughly {diff_worst} more than Scenario 1 in that bad case." if diff_worst is not None else ".")
-            )
-            lines.append("So moving from Scenario 1 to Scenario 3 raises the floor (safer worst-case) while lowering the ceiling (smaller best-case).")
-            if s2 is not None:
-                lines.append(
-                    f"Scenario 2 (Current {s2.get('Current','')}, Monthly {s2.get('Annual','')}, Source {s2.get('Source','')}) sits in the middle—less volatile than going all-in, but with more upside than the most conservative choice."
-                )
-            lines.append("Ask yourself: how much downside are you willing to tolerate in a bad market, and how much upside are you willing to give up to feel more comfortable along the way?")
-            for ln in lines:
-                st.text(ln)
-        # Per-scenario three-point summary (P0/P50/P100)
-        st.text("Three-point summary per scenario (floor/middle/ceiling):")
-        for sc_key in ["Scenario 1","Scenario 2","Scenario 3"]:
-            row = scenario_map.get(sc_key)
-            if row is None:
-                continue
-            st.text(f"{sc_key} – Current {row.get('Current','')}, Monthly {row.get('Annual','')}, Source {row.get('Source','')}")
-            st.text(f"  Floor (P0): {row.get('P0','')}")
-            st.text(f"  Middle (P50): {row.get('P50','')}")
-            st.text(f"  Ceiling (P100): {row.get('P100','')}")
-        st.text(
-            "The middle outcome (P50) is often in the mid-$3M to low-$4M range across scenarios. "
-            "The bigger change is how deep the floor goes in bad markets (P0/P5) and how high the ceiling reaches in great markets (P100)."
-        )
+    def _currency_num(raw):
+        try:
+            return float(str(raw).replace("$","").replace(",",""))
+        except Exception:
+            return None
+    scenario_map = {str(r["Scenario"]): r for _, r in tbl.iterrows()}
+    s1 = scenario_map.get("Scenario 1")
+    s2 = scenario_map.get("Scenario 2")
+    s3 = scenario_map.get("Scenario 3")
+    if s1 is not None and s3 is not None:
+        def _fmt_safe(row, key):
+            return row.get(key,"")
+        def _val(row, key):
+            return _currency_num(row.get(key))
+        s1_p0, s1_p50, s1_p75 = _fmt_safe(s1,"P0"), _fmt_safe(s1,"P50"), _fmt_safe(s1,"P75")
+        s3_p0, s3_p50, s3_p75 = _fmt_safe(s3,"P0"), _fmt_safe(s3,"P50"), _fmt_safe(s3,"P75")
+        s1_p0_num, s3_p0_num = _val(s1,"P0"), _val(s3,"P0")
+        s1_p75_num, s3_p75_num = _val(s1,"P75"), _val(s3,"P75")
+        diff_best_val = s1_p75_num - s3_p75_num if s1_p75_num is not None and s3_p75_num is not None else None
+        diff_best = _fmt_currency(diff_best_val) if diff_best_val is not None else ""
+        diff_worst_val = s3_p0_num - s1_p0_num if s1_p0_num is not None and s3_p0_num is not None else None
+        diff_worst = _fmt_currency(diff_worst_val) if diff_worst_val is not None else ""
+        st.text("You're deciding between three strategies. Here's what each one means for you:")
+        st.text(f"Scenario 1 (100% stocks): Swing for the fences")
+        st.text(f"  If markets are good (P75): You could end up with {s1_p75}")
+        st.text(f"  If markets are terrible: You could end up with {s1_p0}")
+        st.text(f"  Most likely (middle): {s1_p50}")
+        st.text(f"Scenario 3 (60% stocks, 40% bonds): Play it safer")
+        st.text(f"  If markets are good (P75): You could end up with {s3_p75}")
+        st.text(f"  If markets are terrible: You could end up with {s3_p0}")
+        st.text(f"  Most likely (middle): {s3_p50}")
+        if s2 is not None:
+            s2_p0, s2_p50, s2_p75 = _fmt_safe(s2,"P0"), _fmt_safe(s2,"P50"), _fmt_safe(s2,"P75")
+            st.text("Scenario 2 (80% stocks): The compromise")
+            st.text(f"  Floor (P0): {s2_p0}")
+            st.text(f"  Middle (P50): {s2_p50}")
+            st.text(f"  If markets are good (P75): {s2_p75}")
+        if diff_best and diff_worst:
+            st.text(f"The trade-off: going safer (Scenario 3) gives up about {diff_best} when markets are good (P75), but it also protects roughly {diff_worst} in the worst-case (P0).")
+        st.text('The real question: "If the market returns are just horrible over the remaining horizon, would you rather have the safer floor, or swing for more upside knowing the floor is lower?"')
     else:
         st.text("No scenarios available to summarize yet.")
 
