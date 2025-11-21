@@ -531,7 +531,8 @@ selected_source = sb.selectbox(
 )
 metas_for_source = _options_for_source(selected_source)
 clean_options = _clean_list(metas_for_source)
-default_percents = {1: 100, 2: 80, 3: 60}
+DEFAULT_CURRENT_PCTS = {1: 100, 2: 80, 3: 60}
+DEFAULT_ANNUAL_PCTS = {1: 100, 2: 80, 3: 60}
 
 def _default_clean_for(source_label: str, pct: int) -> str:
     if source_label == "Global":
@@ -546,23 +547,30 @@ chart_view = sb.radio(
 
 for idx in range(1, 4):
     metas = metas_for_source
-    default_clean = _default_clean_for(selected_source, default_percents.get(idx, 100))
+    # Current allocation: 100/80/60
+    current_default_clean = _default_clean_for(selected_source, DEFAULT_CURRENT_PCTS.get(idx, 100))
+    # Annual allocation defaults per scenario (configurable above)
+    annual_default_clean = _default_clean_for(selected_source, DEFAULT_ANNUAL_PCTS.get(idx, 100))
     try:
-        default_index = clean_options.index(default_clean)
+        current_default_index = clean_options.index(current_default_clean)
     except ValueError:
-        default_index = 0 if clean_options else None
+        current_default_index = 0 if clean_options else None
+    try:
+        annual_default_index = clean_options.index(annual_default_clean)
+    except ValueError:
+        annual_default_index = 0 if clean_options else None
     current_clean = sb.selectbox(
         f"Scenario {idx} current allocation",
         options=clean_options,
         format_func=lambda c: PRETTY_LBM.get(c, PRETTY_SPX.get(c, c)),
-        index=default_index if default_index is not None else 0,
+        index=current_default_index if current_default_index is not None else 0,
         key=f"sc{idx}_current"
     ) if clean_options else None
     annual_clean = sb.selectbox(
         f"Scenario {idx} annual allocation",
         options=clean_options,
         format_func=lambda c: PRETTY_LBM.get(c, PRETTY_SPX.get(c, c)),
-        index=default_index if default_index is not None else 0,
+        index=annual_default_index if annual_default_index is not None else 0,
         key=f"sc{idx}_annual"
     ) if clean_options else None
     scenarios.append({
@@ -593,11 +601,13 @@ def _rgba(hex_color: str, alpha: float) -> str:
     return f"rgba({r},{g},{b},{alpha})"
 
 for sc_idx, sc in enumerate(scenarios):
-    name = f"{sc['label']} ({sc['source']})"
+    def _pretty_alloc(source, clean):
+        return PRETTY_LBM.get(clean, clean) if source == "Global" else PRETTY_SPX.get(clean, clean)
+    strategy_name = f"{sc['label']}: Current {_pretty_alloc(sc['source'], sc['current_clean'])} / Monthly {_pretty_alloc(sc['source'], sc['annual_clean'])} ({sc['source']})"
     outcomes, idxs = _scenario_outcomes(sc["source"], sc["current_clean"], sc["annual_clean"])
     if outcomes is None:
         continue
-    outcomes_map[name] = outcomes
+    outcomes_map[strategy_name] = outcomes
     values = np.quantile(outcomes, percentiles)
     tab_vals = np.quantile(outcomes, table_percentiles)
     color = colors[sc_idx % len(colors)] if colors else None
@@ -627,7 +637,7 @@ for sc_idx, sc in enumerate(scenarios):
         y=[median_val, median_val],
         mode="lines",
         line=dict(color=color, width=2),
-        name=name,
+        name=strategy_name,
     ))
     # CDF trace
     sorted_outcomes = np.sort(outcomes)
@@ -637,17 +647,9 @@ for sc_idx, sc in enumerate(scenarios):
             x=sorted_outcomes,
             y=probs,
             mode="lines",
-            name=name,
+            name=strategy_name,
             line=dict(color=color),
         ))
-    # Box/violin (box for simplicity)
-    box_traces.append(go.Box(
-        y=outcomes,
-        name=name,
-        marker_color=color,
-        boxmean=True,
-        hovertemplate=f"{name}<br>%{{y:,.0f}}<extra></extra>",
-    ))
     # Percentile slope points
     slope_labels = ["P0","P5","P10","P25","P50","P75","P90","P95","P100"]
     slope_values = [
@@ -658,31 +660,31 @@ for sc_idx, sc in enumerate(scenarios):
         x=slope_labels,
         y=slope_values,
         mode="lines+markers",
-        name=name,
+        name=strategy_name,
         line=dict(color=color),
     ))
     low_traces.append(go.Scatter(
         x=["P0","P5","P10"],
         y=[tab_vals[0], tab_vals[1], tab_vals[2]],
         mode="lines+markers",
-        name=name,
+        name=strategy_name,
         line=dict(color=color),
     ))
     # Box with jittered points
     box_traces.append(go.Box(
         y=outcomes,
-        name=name,
+        name=strategy_name,
         marker_color=color,
         boxmean=True,
         boxpoints="all",
         jitter=0.4,
         pointpos=0,
         marker=dict(opacity=0.2, size=4, color=color),
-        hovertemplate=f"{name}<br>%{{y:,.0f}}<extra></extra>",
+        hovertemplate=f"{strategy_name}<br>%{{y:,.0f}}<extra></extra>",
     ))
     p5, p25, p50, p75, p95 = np.percentile(outcomes, [5, 25, 50, 75, 95])
     perc_marker_traces.append(go.Scatter(
-        x=[name]*5,
+        x=[strategy_name]*5,
         y=[p5, p25, p50, p75, p95],
         mode="markers",
         showlegend=False,
@@ -705,6 +707,10 @@ for sc_idx, sc in enumerate(scenarios):
                     p0_begin = pd.to_datetime(date_val).strftime("%Y-%m")
         except Exception:
             p0_begin = None
+    def _pretty_alloc(source, clean):
+        return PRETTY_LBM.get(clean, clean) if source == "Global" else PRETTY_SPX.get(clean, clean)
+    current_label = _pretty_alloc(sc["source"], sc["current_clean"])
+    annual_label = _pretty_alloc(sc["source"], sc["annual_clean"])
     table_rows.append({
         "Scenario": sc["label"],
         "Source": sc["source"],
@@ -718,6 +724,8 @@ for sc_idx, sc in enumerate(scenarios):
         "P90": tab_vals[6],
         "P95": tab_vals[7],
         "P100": tab_vals[8],
+        "Current": current_label,
+        "Annual": annual_label,
     })
 
 if slope_traces and annual_amount > 0:
@@ -749,5 +757,89 @@ if table_rows and annual_amount > 0:
     tbl = tbl.rename(columns={"P0 Begin": "P0 Begin Row"})
     st.subheader("Scenario Percentiles")
     st.table(tbl)
+    # Summary referencing P50 with P5/P0 context (plain text)
+    st.subheader("Readable Summary")
+    def _num(series):
+        return pd.to_numeric(series.astype(str).str.replace("[^0-9.-]", "", regex=True), errors="coerce")
+    p50_num = _num(tbl.get("P50", pd.Series(dtype=float)))
+    if p50_num.notna().any():
+        best_idx = int(p50_num.idxmax())
+        worst_idx = int(p50_num.idxmin())
+        best_row = tbl.loc[best_idx]
+        worst_row = tbl.loc[worst_idx] if worst_idx in tbl.index else None
+        best_val_num = p50_num.loc[best_idx]
+        worst_val_num = p50_num.loc[worst_idx] if worst_row is not None else None
+        diff_txt = ""
+        if worst_row is not None and pd.notna(best_val_num) and pd.notna(worst_val_num):
+            diff_val = best_val_num - worst_val_num
+            diff_txt = (
+                f" The difference between this median outcome and the more conservative strategy of "
+                f"{worst_row['Scenario']} (Current {worst_row.get('Current','')}, Monthly {worst_row.get('Annual','')}) "
+                f"is {_fmt_currency(diff_val)}."
+            )
+        summary_txt_1 = (
+            f"If you focus on upside (P50), the highest P50 is {best_row['P50']} for {best_row['Scenario']} "
+            f"(Current {best_row.get('Current','')}, Monthly {best_row.get('Annual','')}, Source {best_row['Source']})."
+            f"{diff_txt}"
+        )
+        summary_txt_2 = (
+            f"But you need to be comfortable with the downside too: The P5 (5th percentile) means five percent of historical outcomes is equal to or lower than {best_row['P5']} and the lowest historical outcome (P0) is {best_row['P0']}."
+        )
+        st.text(summary_txt_1)
+        st.text(summary_txt_2)
+        # Extra narrative comparing scenarios (if present)
+        scenario_map = {str(r["Scenario"]): r for _, r in tbl.iterrows()}
+        s1 = scenario_map.get("Scenario 1")
+        s2 = scenario_map.get("Scenario 2")
+        s3 = scenario_map.get("Scenario 3")
+        def _currency_num(raw):
+            try:
+                return float(str(raw).replace("$","").replace(",",""))
+            except Exception:
+                return None
+        lines = []
+        if s1 is not None and s3 is not None:
+            s1_best = s1.get("P100")
+            s1_worst = s1.get("P0")
+            s3_best = s3.get("P100")
+            s3_worst = s3.get("P0")
+            s3_worst_val = _currency_num(s3_worst)
+            s1_worst_val = _currency_num(s1_worst)
+            diff_worst = None
+            if s3_worst_val is not None and s1_worst_val is not None:
+                diff_worst = _fmt_currency(s3_worst_val - s1_worst_val)
+            lines.append(
+                f"We’ve modelled three versions of your plan. Scenario 1 (Current {s1.get('Current','')}, Monthly {s1.get('Annual','')}, Source {s1.get('Source','')}) "
+                f"has the highest upside: in the very best historical periods it reached about {s1_best}, but in the worst-ever period it landed around {s1_worst}."
+            )
+            lines.append(
+                f"Scenario 3 (Current {s3.get('Current','')}, Monthly {s3.get('Annual','')}, Source {s3.get('Source','')}) is more balanced. "
+                f"Its best periods reach about {s3_best}, but in the worst-ever period it was about {s3_worst}"
+                + (f", roughly {diff_worst} more than Scenario 1 in that bad case." if diff_worst is not None else ".")
+            )
+            lines.append("So moving from Scenario 1 to Scenario 3 raises the floor (safer worst-case) while lowering the ceiling (smaller best-case).")
+            if s2 is not None:
+                lines.append(
+                    f"Scenario 2 (Current {s2.get('Current','')}, Monthly {s2.get('Annual','')}, Source {s2.get('Source','')}) sits in the middle—less volatile than going all-in, but with more upside than the most conservative choice."
+                )
+            lines.append("Ask yourself: how much downside are you willing to tolerate in a bad market, and how much upside are you willing to give up to feel more comfortable along the way?")
+            for ln in lines:
+                st.text(ln)
+        # Per-scenario three-point summary (P0/P50/P100)
+        st.text("Three-point summary per scenario (floor/middle/ceiling):")
+        for sc_key in ["Scenario 1","Scenario 2","Scenario 3"]:
+            row = scenario_map.get(sc_key)
+            if row is None:
+                continue
+            st.text(f"{sc_key} – Current {row.get('Current','')}, Monthly {row.get('Annual','')}, Source {row.get('Source','')}")
+            st.text(f"  Floor (P0): {row.get('P0','')}")
+            st.text(f"  Middle (P50): {row.get('P50','')}")
+            st.text(f"  Ceiling (P100): {row.get('P100','')}")
+        st.text(
+            "The middle outcome (P50) is often in the mid-$3M to low-$4M range across scenarios. "
+            "The bigger change is how deep the floor goes in bad markets (P0/P5) and how high the ceiling reaches in great markets (P100)."
+        )
+    else:
+        st.text("No scenarios available to summarize yet.")
 
 st.stop()
